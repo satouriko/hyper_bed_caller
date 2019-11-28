@@ -95,6 +95,34 @@ fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
                     tdlib.send(&req.to_json().expect("Bad JSON"))
                 }
             }
+            "updateNewMessage" => {
+                let update_new_message: UpdateNewMessage =
+                    serde_json::from_str(json.as_str()).unwrap_or_default();
+                let message = update_new_message.message();
+                if message.is_outgoing() {
+                    continue;
+                }
+                println!("{}", json);
+                match message.content() {
+                    MessageContent::MessageText(message_text) => {
+                        let text = message_text.text().text();
+                        if text.starts_with("#help") {
+                            let req = SendMessage::builder()
+                                .chat_id(message.chat_id())
+                                .input_message_content(InputMessageContent::InputMessageText(
+                                    InputMessageText::builder()
+                                        .text(FormattedText::builder().text("#help").build())
+                                        .clear_draft(true)
+                                        .build(),
+                                ))
+                                .reply_to_message_id(message.id())
+                                .build();
+                            tdlib.send(&req.to_json().expect("Bad JSON"));
+                        }
+                    }
+                    _ => (),
+                }
+            }
             _ => {
                 println!("{}\t{}", td_type, json);
             }
