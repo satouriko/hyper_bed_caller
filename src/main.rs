@@ -124,6 +124,9 @@ fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
                             let text = message_text.text().text();
                             let cmd = parse_command_msg(text);
                             match cmd.cmd() {
+                                "#help" => {
+                                    reply_text_msg("https://telegra.ph/%E4%BD%BF%E7%94%A8%E5%B8%AE%E5%8A%A9-11-29");
+                                }
                                 "#alarm" => {
                                     let alarm_args = parse_alarm_args(cmd.arg());
                                     let to_send = match alarm_args {
