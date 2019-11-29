@@ -1,5 +1,6 @@
 use std::{env, io, sync::Arc, thread, time};
 extern crate uname;
+use hyper_bed_caller::*;
 use rtdlib::{tdjson::Tdlib, types::*};
 
 fn main() {
@@ -106,12 +107,15 @@ fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
                 match message.content() {
                     MessageContent::MessageText(message_text) => {
                         let text = message_text.text().text();
-                        if text.starts_with("#help") {
+                        if text.starts_with("#") {
+                            let text = message_text.text().text();
+                            let cmd = parse_params(text);
+                            let to_send = format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
                             let req = SendMessage::builder()
                                 .chat_id(message.chat_id())
                                 .input_message_content(InputMessageContent::InputMessageText(
                                     InputMessageText::builder()
-                                        .text(FormattedText::builder().text("#help").build())
+                                        .text(FormattedText::builder().text(to_send).build())
                                         .clear_draft(true)
                                         .build(),
                                 ))
