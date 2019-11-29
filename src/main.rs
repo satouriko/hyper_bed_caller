@@ -104,24 +104,44 @@ fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
                     continue;
                 }
                 println!("{}", json);
+                let reply_text_msg = |to_send: &str| {
+                    let req = SendMessage::builder()
+                        .chat_id(message.chat_id())
+                        .input_message_content(InputMessageContent::InputMessageText(
+                            InputMessageText::builder()
+                                .text(FormattedText::builder().text(to_send).build())
+                                .clear_draft(true)
+                                .build(),
+                        ))
+                        .reply_to_message_id(message.id())
+                        .build();
+                    tdlib.send(&req.to_json().expect("Bad JSON"));
+                };
                 match message.content() {
                     MessageContent::MessageText(message_text) => {
                         let text = message_text.text().text();
                         if text.starts_with("#") {
                             let text = message_text.text().text();
-                            let cmd = parse_params(text);
-                            let to_send = format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
-                            let req = SendMessage::builder()
-                                .chat_id(message.chat_id())
-                                .input_message_content(InputMessageContent::InputMessageText(
-                                    InputMessageText::builder()
-                                        .text(FormattedText::builder().text(to_send).build())
-                                        .clear_draft(true)
-                                        .build(),
-                                ))
-                                .reply_to_message_id(message.id())
-                                .build();
-                            tdlib.send(&req.to_json().expect("Bad JSON"));
+                            let cmd = parse_command_msg(text);
+                            match cmd.cmd() {
+                                "#alarm" => {
+                                    let alarm_args = parse_alarm_args(cmd.arg());
+                                    let to_send = match alarm_args {
+                                        Err(error) => String::from(error),
+                                        Ok(cron_args) => format!(
+                                            "cron: {}\ntitle: {}",
+                                            cron_args.cron(),
+                                            cron_args.title()
+                                        ),
+                                    };
+                                    reply_text_msg(&to_send);
+                                }
+                                _ => {
+                                    let to_send =
+                                        format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
+                                    reply_text_msg(&to_send);
+                                }
+                            }
                         }
                     }
                     _ => (),
