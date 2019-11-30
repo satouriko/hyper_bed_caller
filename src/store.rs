@@ -1,25 +1,40 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
+use std::sync::{Mutex, MutexGuard};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct State {}
+pub struct Alarm {
+    pub user_id: i64,
+    pub chat_id: i64,
+    pub cron: String,
+    pub title: String,
+    pub is_strict: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct State {
+    pub alarms: HashMap<i64, RefCell<Vec<Alarm>>>,
+}
 
 impl State {
     pub fn new() -> State {
-        State {}
+        State {
+            alarms: HashMap::new(),
+        }
     }
 }
 
 pub struct Store {
     path: String,
-    state: RefCell<State>,
+    state: Mutex<State>,
 }
 
 impl Store {
-    pub fn state(&self) -> RefMut<'_, State> {
-        self.state.borrow_mut()
+    pub fn state(&self) -> MutexGuard<State> {
+        self.state.lock().unwrap()
     }
     pub fn save(&self) -> Result<(), std::io::Error> {
         let json = serde_json::to_string(&*self.state()).expect("JSON serialize error");
@@ -34,7 +49,7 @@ impl Store {
         };
         let store = Store {
             path: String::from(path),
-            state: RefCell::new(state.clone()),
+            state: Mutex::new(state.clone()),
         };
         store.save().unwrap();
         return store;

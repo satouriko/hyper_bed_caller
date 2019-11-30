@@ -1,9 +1,9 @@
-use std::{env, io, sync::Arc, thread, time};
+use std::{cell::RefCell, env, io, sync::Arc, thread, time};
 extern crate uname;
-use crate::cmd::*;
+use crate::{cmd::*, store::*};
 use rtdlib::{tdjson::Tdlib, types::*};
 
-pub fn initialize_app() -> Arc<Tdlib> {
+pub fn initialize_app(path: &str) -> (Arc<Tdlib>, Arc<Store>) {
     let tdlib = Arc::new(Tdlib::new());
     let set_online = SetOption::builder()
         .name("online")
@@ -12,10 +12,11 @@ pub fn initialize_app() -> Arc<Tdlib> {
         ))
         .build();
     tdlib.send(&set_online.to_json().expect("Bad JSON"));
-    return tdlib;
+    let store = Arc::new(Store::new(path));
+    return (tdlib, store);
 }
 
-pub fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
+pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
     thread::spawn(move || loop {
         let json = tdlib.receive(60.0);
         if let None = json {
@@ -117,30 +118,79 @@ pub fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
                 match message.content() {
                     MessageContent::MessageText(message_text) => {
                         let text = message_text.text().text();
-                        if text.starts_with("#") {
-                            let text = message_text.text().text();
-                            let cmd = parse_command_msg(text);
-                            match cmd.cmd() {
-                                "#help" => {
-                                    reply_text_msg("https://telegra.ph/%E4%BD%BF%E7%94%A8%E5%B8%AE%E5%8A%A9-11-29");
-                                }
-                                "#alarm" => {
-                                    let alarm_args = parse_alarm_args(cmd.arg());
-                                    let to_send = match alarm_args {
-                                        Err(error) => String::from(error),
-                                        Ok(cron_args) => format!(
+                        if !text.starts_with("#") {
+                            continue;
+                        }
+                        let text = message_text.text().text();
+                        let cmd = parse_command_msg(text);
+                        match cmd.cmd() {
+                            "#help" => {
+                                reply_text_msg(
+                                    "https://telegra.ph/%E4%BD%BF%E7%94%A8%E5%B8%AE%E5%8A%A9-11-29",
+                                );
+                            }
+                            "#alarm" => {
+                                let alarm_args = parse_alarm_args(cmd.arg());
+                                let (alarm, to_send) = match alarm_args {
+                                    Err(error) => (None, String::from(error)),
+                                    Ok(cron_args) => (
+                                        Some(Alarm {
+                                            user_id: message.sender_user_id(),
+                                            chat_id: message.chat_id(),
+                                            cron: String::from(cron_args.cron()),
+                                            title: String::from(cron_args.title()),
+                                            is_strict: false,
+                                        }),
+                                        format!(
                                             "cron: {}\ntitle: {}",
                                             cron_args.cron(),
                                             cron_args.title()
                                         ),
-                                    };
-                                    reply_text_msg(&to_send);
+                                    ),
+                                };
+                                if let Some(alarm) = alarm {
+                                    {
+                                        let mut state = store.state();
+                                        let user_alarms =
+                                            state.alarms.get(&message.sender_user_id());
+                                        if let None = user_alarms {
+                                            state.alarms.insert(
+                                                message.sender_user_id(),
+                                                RefCell::new(vec![]),
+                                            );
+                                        }
+                                        let mut user_alarms = state
+                                            .alarms
+                                            .get(&message.sender_user_id())
+                                            .unwrap()
+                                            .borrow_mut();
+                                        user_alarms.push(alarm);
+                                    }
+                                    store.save().expect("Failed to save state");
                                 }
-                                _ => {
-                                    let to_send =
-                                        format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
-                                    reply_text_msg(&to_send);
-                                }
+                                reply_text_msg(&to_send);
+                            }
+                            "#list" => {
+                                let state = store.state();
+                                let user_alarms = state.alarms.get(&message.sender_user_id());
+                                let to_send = match user_alarms {
+                                    None => String::from("还一个闹钟都没有呢。"),
+                                    Some(alarms) => {
+                                        let mut to_send = String::from("");
+                                        for (i, alarm) in alarms.borrow().iter().enumerate() {
+                                            to_send += &format!(
+                                                "[{}] {} {} {}",
+                                                i, alarm.cron, alarm.title, alarm.is_strict
+                                            );
+                                        }
+                                        to_send
+                                    }
+                                };
+                                reply_text_msg(&to_send);
+                            }
+                            _ => {
+                                let to_send = format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
+                                reply_text_msg(&to_send);
                             }
                         }
                     }
@@ -154,10 +204,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
     })
 }
 
-pub fn start_cron(tdlib: Arc<Tdlib>) -> thread::JoinHandle<()> {
+pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         thread::sleep(time::Duration::from_secs(5));
         let get_me = GetMe::builder().build();
         tdlib.send(&get_me.to_json().expect("Bad JSON"));
+        println!("{:?}", store.state());
     })
 }
