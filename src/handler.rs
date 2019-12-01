@@ -1,6 +1,8 @@
 use std::{cell::RefCell, env, io, sync::Arc, thread, time};
 extern crate uname;
-use crate::{cmd::*, store::*};
+use crate::{cmd::*, cron::*, store::*};
+use chrono;
+use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
 
 pub fn initialize_app(path: &str) -> (Arc<Tdlib>, Arc<Store>) {
@@ -129,27 +131,53 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     "https://telegra.ph/%E4%BD%BF%E7%94%A8%E5%B8%AE%E5%8A%A9-11-29",
                                 );
                             }
+                            "#timezone" => {
+                                if cmd.arg() == "" {
+                                    let state = store.state();
+                                    let tz = state.timezones.get(&message.sender_user_id());
+                                    let current_tz_str = match tz {
+                                        Some(tz) => tz.clone(),
+                                        None => chrono::Local::now().format("%Z").to_string(),
+                                    };
+                                    reply_text_msg(&format!("当前时区：{}", current_tz_str));
+                                    continue;
+                                }
+                                let tz = cmd.arg().parse::<Tz>();
+                                let to_send = match tz {
+                                    Err(_) => String::from("没有这个时区。"),
+                                    Ok(_) => {
+                                        let mut state = store.state();
+                                        state.timezones.insert(
+                                            message.sender_user_id(),
+                                            String::from(cmd.arg()),
+                                        );
+                                        format!("时区已更新为 {}。", cmd.arg())
+                                    }
+                                };
+                                store.save().expect("Failed to save state");
+                                reply_text_msg(&to_send);
+                            }
                             "#alarm" => {
-                                let alarm_args = parse_alarm_args(cmd.arg());
-                                let (alarm, to_send) = match alarm_args {
-                                    Err(error) => (None, String::from(error)),
-                                    Ok(cron_args) => (
-                                        Some(Alarm {
+                                let alarm_args = {
+                                    let state = store.state();
+                                    let tz = state.timezones.get(&message.sender_user_id());
+                                    match tz {
+                                        Some(tz) => {
+                                            parse_alarm_args(cmd.arg(), &tz.parse::<Tz>().unwrap())
+                                        }
+                                        None => parse_alarm_args(cmd.arg(), &chrono::Local),
+                                    }
+                                };
+                                let to_send = match alarm_args {
+                                    Err(error) => String::from(error),
+                                    Ok(cron_args) => {
+                                        let alarm = Alarm {
                                             user_id: message.sender_user_id(),
                                             chat_id: message.chat_id(),
                                             cron: String::from(cron_args.cron()),
                                             title: String::from(cron_args.title()),
                                             is_strict: false,
-                                        }),
-                                        format!(
-                                            "cron: {}\ntitle: {}",
-                                            cron_args.cron(),
-                                            cron_args.title()
-                                        ),
-                                    ),
-                                };
-                                if let Some(alarm) = alarm {
-                                    {
+                                        };
                                         let mut state = store.state();
                                         let user_alarms =
                                             state.alarms.get(&message.sender_user_id());
@@ -165,9 +193,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                             .unwrap()
                                             .borrow_mut();
                                         user_alarms.push(alarm);
+                                        format!(
+                                            "cron: {}\ntitle: {}",
+                                            cron_args.cron(),
+                                            cron_args.title()
+                                        )
                                     }
-                                    store.save().expect("Failed to save state");
-                                }
+                                };
+                                store.save().expect("Failed to save state");
                                 reply_text_msg(&to_send);
                             }
                             "#list" => {
@@ -179,13 +212,82 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         let mut to_send = String::from("");
                                         for (i, alarm) in alarms.borrow().iter().enumerate() {
                                             to_send += &format!(
-                                                "[{}] {} {} {}",
+                                                "[{}] {} {} {}\n",
                                                 i, alarm.cron, alarm.title, alarm.is_strict
                                             );
                                         }
                                         to_send
                                     }
                                 };
+                                reply_text_msg(&to_send);
+                            }
+                            "#disalarm" => {
+                                let id = cmd.arg().parse::<usize>();
+                                if let Err(_) = id {
+                                    reply_text_msg("闹钟编号格式有误。");
+                                    continue;
+                                }
+                                let id = id.unwrap();
+                                let to_send = {
+                                    let state = store.state();
+                                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                                    match user_alarms {
+                                        None => String::from("没有这个编号的闹钟。"),
+                                        Some(alarms) => {
+                                            let mut alarms = alarms.borrow_mut();
+                                            if id >= alarms.len() {
+                                                String::from("没有这个编号的闹钟。")
+                                            } else {
+                                                alarms.remove(id);
+                                                String::from("闹钟已移除。")
+                                            }
+                                        }
+                                    }
+                                };
+                                store.save().expect("Failed to save state");
+                                reply_text_msg(&to_send);
+                            }
+                            "#test" => {
+                                let mut to_send = String::from("");
+                                let state = store.state();
+                                let user_alarms = state.alarms.get(&message.sender_user_id());
+                                if let None = user_alarms {
+                                    continue;
+                                }
+                                let alarms = user_alarms.unwrap();
+                                for alarm in alarms.borrow().iter() {
+                                    let tz = state.timezones.get(&message.sender_user_id());
+                                    match tz {
+                                        Some(tz) => {
+                                            let next_alarm = get_next_schedule(
+                                                &alarm.cron,
+                                                tz.parse::<Tz>().unwrap(),
+                                            );
+                                            match next_alarm {
+                                                Some(next_alarm) => {
+                                                    to_send += &(next_alarm.to_rfc3339() + "\n");
+                                                }
+                                                None => {
+                                                    to_send += "No more schedule\n";
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            let next_alarm = get_next_schedule(
+                                                &alarm.cron,
+                                                chrono::Local.clone(),
+                                            );
+                                            match next_alarm {
+                                                Some(next_alarm) => {
+                                                    to_send += &(next_alarm.to_rfc3339() + "\n");
+                                                }
+                                                None => {
+                                                    to_send += "No more schedule\n";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 reply_text_msg(&to_send);
                             }
                             _ => {

@@ -1,6 +1,7 @@
 extern crate cron;
 use chrono::{self, prelude::*};
 use cron::Schedule;
+use std::fmt::Display;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
@@ -57,7 +58,11 @@ fn test_cron(input: &str) -> Result<String, &'static str> {
     }
 }
 
-fn test_time_str(input: &str) -> Result<String, &'static str> {
+fn test_time_str<Z>(input: &str, tz: &Z) -> Result<String, &'static str>
+where
+    Z: TimeZone,
+    Z::Offset: Display,
+{
     let input = input.trim();
     let first_space = input.find(char::is_whitespace);
     let time_str = match first_space {
@@ -91,7 +96,7 @@ fn test_time_str(input: &str) -> Result<String, &'static str> {
     };
     match day_str {
         "once" => {
-            let now = chrono::Local::now();
+            let now = chrono::Local::now().with_timezone(tz);
             let fmt_str = format!("%Y-%m-%d {}:{}:00 %z", h, m);
             let today_alarm_str = now.format(fmt_str.as_str()).to_string();
             let today_alarm_time =
@@ -122,7 +127,11 @@ fn test_time_str(input: &str) -> Result<String, &'static str> {
     }
 }
 
-pub fn parse_alarm_args(input: &str) -> Result<CronArgs, &str> {
+pub fn parse_alarm_args<'a, Z>(input: &'a str, tz: &Z) -> Result<CronArgs<'a>, &'static str>
+where
+    Z: TimeZone,
+    Z::Offset: Display,
+{
     let first_hash = input.find('#');
     let title = match first_hash {
         Some(first_hash) => &input[first_hash..],
@@ -132,7 +141,7 @@ pub fn parse_alarm_args(input: &str) -> Result<CronArgs, &str> {
         Some(first_hash) => &input[..first_hash],
         None => input,
     });
-    let time_str = test_time_str(alarm_str.as_str());
+    let time_str = test_time_str(alarm_str.as_str(), tz);
     if let Ok(time_str) = time_str {
         alarm_str = String::from(time_str)
     }

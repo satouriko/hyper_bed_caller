@@ -17,12 +17,14 @@ pub struct Alarm {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub alarms: HashMap<i64, RefCell<Vec<Alarm>>>,
+    pub timezones: HashMap<i64, String>,
 }
 
 impl State {
     pub fn new() -> State {
         State {
             alarms: HashMap::new(),
+            timezones: HashMap::new(),
         }
     }
 }
