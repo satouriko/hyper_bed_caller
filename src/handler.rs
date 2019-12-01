@@ -247,47 +247,38 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 store.save().expect("Failed to save state");
                                 reply_text_msg(&to_send);
                             }
-                            "#test" => {
-                                let mut to_send = String::from("");
+                            "#next" => {
                                 let state = store.state();
                                 let user_alarms = state.alarms.get(&message.sender_user_id());
                                 if let None = user_alarms {
                                     continue;
                                 }
-                                let alarms = user_alarms.unwrap();
-                                for alarm in alarms.borrow().iter() {
-                                    let tz = state.timezones.get(&message.sender_user_id());
-                                    match tz {
-                                        Some(tz) => {
-                                            let next_alarm = get_next_schedule(
-                                                &alarm.cron,
-                                                tz.parse::<Tz>().unwrap(),
-                                            );
-                                            match next_alarm {
-                                                Some(next_alarm) => {
-                                                    to_send += &(next_alarm.to_rfc3339() + "\n");
-                                                }
-                                                None => {
-                                                    to_send += "No more schedule\n";
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            let next_alarm = get_next_schedule(
-                                                &alarm.cron,
-                                                chrono::Local.clone(),
-                                            );
-                                            match next_alarm {
-                                                Some(next_alarm) => {
-                                                    to_send += &(next_alarm.to_rfc3339() + "\n");
-                                                }
-                                                None => {
-                                                    to_send += "No more schedule\n";
-                                                }
-                                            }
-                                        }
+                                let alarms = user_alarms.unwrap().borrow();
+                                let tz = state.timezones.get(&message.sender_user_id());
+                                let (tz_str, alarm_title) = match tz {
+                                    Some(tz) => {
+                                        let next_alarm =
+                                            get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap());
+                                        (
+                                            schedule_to_string(next_alarm.schedule()),
+                                            next_alarm.alarm_title(),
+                                        )
                                     }
-                                }
+                                    None => {
+                                        let next_alarm =
+                                            get_recent_schedule(&alarms, chrono::Local.clone());
+                                        (
+                                            schedule_to_string(next_alarm.schedule()),
+                                            next_alarm.alarm_title(),
+                                        )
+                                    }
+                                };
+                                let to_send = match tz_str {
+                                    Some(tz_str) => {
+                                        format!("下次闹钟时间：{} {}", tz_str, alarm_title)
+                                    }
+                                    None => format!("没有要响的闹钟了。"),
+                                };
                                 reply_text_msg(&to_send);
                             }
                             _ => {
