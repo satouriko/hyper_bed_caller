@@ -256,7 +256,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         let next_alarm =
                                             get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap());
                                         (
-                                            schedule_to_string(next_alarm.schedule()),
+                                            next_alarm.schedule().to_string(),
                                             next_alarm.alarm_title(),
                                         )
                                     }
@@ -264,7 +264,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         let next_alarm =
                                             get_recent_schedule(&alarms, chrono::Local.clone());
                                         (
-                                            schedule_to_string(next_alarm.schedule()),
+                                            next_alarm.schedule().to_string(),
                                             next_alarm.alarm_title(),
                                         )
                                     }

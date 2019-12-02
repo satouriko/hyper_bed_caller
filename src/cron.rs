@@ -1,14 +1,18 @@
 use crate::store::Alarm;
 use chrono::{self, prelude::*};
-use cron::Schedule;
+use cron;
 use std::fmt::Display;
 use std::str::FromStr;
 
+#[derive(Debug)]
 pub struct AlarmSchedule<'a, Z: TimeZone> {
     inner: Option<(DateTime<Z>, &'a Alarm)>,
 }
 
-impl<Z: TimeZone> AlarmSchedule<'_, Z> {
+impl<Z> AlarmSchedule<'_, Z>
+where
+    Z: TimeZone + 'static,
+{
     pub fn default() -> AlarmSchedule<'static, Z> {
         AlarmSchedule { inner: None }
     }
@@ -17,10 +21,10 @@ impl<Z: TimeZone> AlarmSchedule<'_, Z> {
             inner: Some((schedule, alarm)),
         }
     }
-    pub fn schedule(&self) -> Option<&DateTime<Z>> {
+    pub fn schedule(&self) -> ScheduleRef<'_, Z> {
         match &self.inner {
-            None => None,
-            Some(alarm_schedule) => Some(&alarm_schedule.0),
+            None => ScheduleRef::default(),
+            Some(alarm_schedule) => ScheduleRef::new(&alarm_schedule.0),
         }
     }
     pub fn alarm_title(&self) -> String {
@@ -33,48 +37,138 @@ impl<Z: TimeZone> AlarmSchedule<'_, Z> {
 
 pub fn get_recent_schedule<Z>(alarms: &Vec<Alarm>, timezone: Z) -> AlarmSchedule<Z>
 where
-    Z: TimeZone,
+    Z: TimeZone + 'static,
 {
     let next_timestamp = 0;
-    let mut recent = AlarmSchedule::<Z>::default();
+    let mut recent = AlarmSchedule::default();
     for alarm in alarms.iter() {
         let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
-        let t = schedule_to_timestamp(next_alarm.as_ref());
+        let t = next_alarm.to_timestamp();
         if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
-            recent = AlarmSchedule::new(next_alarm.unwrap(), &alarm);
+            recent = AlarmSchedule::new(next_alarm.inner.unwrap(), &alarm);
         }
     }
     return recent;
 }
 
-pub fn get_next_schedule<Z>(cron: &str, timezone: Z) -> Option<DateTime<Z>>
+pub trait AsScheduleRef<Z>
 where
-    Z: TimeZone,
+    Z: TimeZone + 'static,
 {
-    let schedule = Schedule::from_str(cron).unwrap();
-    for datetime in schedule.upcoming(timezone).take(1) {
-        return Some(datetime);
-    }
-    return None;
-}
-
-pub fn schedule_to_timestamp<Z>(schedule: Option<&DateTime<Z>>) -> i64
-where
-    Z: TimeZone,
-{
-    match schedule {
-        Some(schedule) => schedule.timestamp(),
-        None => -1,
+    fn as_ref(&self) -> ScheduleRef<Z>;
+    fn to_timestamp(&self) -> i64 {
+        match self.as_ref().inner.as_ref() {
+            Some(schedule) => schedule.timestamp(),
+            None => -1,
+        }
     }
 }
 
-pub fn schedule_to_string<Z>(schedule: Option<&DateTime<Z>>) -> Option<String>
+pub trait AsPrintableScheduleRef<Z>: AsScheduleRef<Z>
 where
-    Z: TimeZone,
+    Z: TimeZone + 'static,
     Z::Offset: Display,
 {
-    match schedule {
-        Some(schedule) => Some(schedule.to_rfc3339()),
-        None => None,
+    fn to_string(&self) -> Option<String> {
+        match self.as_ref().inner.as_ref() {
+            Some(schedule) => Some(schedule.to_rfc3339()),
+            None => None,
+        }
     }
+}
+
+#[derive(Debug, Copy)]
+pub struct ScheduleRef<'a, Z: TimeZone + 'static> {
+    inner: Option<&'a DateTime<Z>>,
+}
+
+impl<Z> ScheduleRef<'_, Z>
+where
+    Z: TimeZone,
+{
+    pub fn new<'a>(datetime: &'a DateTime<Z>) -> ScheduleRef<'a, Z> {
+        ScheduleRef {
+            inner: Some(datetime),
+        }
+    }
+    pub fn default() -> ScheduleRef<'static, Z> {
+        ScheduleRef { inner: None }
+    }
+}
+
+impl<'a, Z> Clone for ScheduleRef<'a, Z>
+where
+    Z: TimeZone + 'static,
+{
+    fn clone(&self) -> ScheduleRef<'a, Z> {
+        match &self.inner {
+            None => ScheduleRef::default(),
+            Some(datetime) => ScheduleRef::new(datetime),
+        }
+    }
+}
+
+impl<Z> AsScheduleRef<Z> for ScheduleRef<'_, Z>
+where
+    Z: TimeZone + 'static,
+{
+    fn as_ref(&self) -> ScheduleRef<Z> {
+        self.clone()
+    }
+}
+
+impl<Z> AsPrintableScheduleRef<Z> for ScheduleRef<'_, Z>
+where
+    Z: TimeZone + 'static,
+    Z::Offset: Display,
+{
+}
+
+#[derive(Debug)]
+pub struct Schedule<Z: TimeZone> {
+    inner: Option<DateTime<Z>>,
+}
+
+impl<Z> Schedule<Z>
+where
+    Z: TimeZone,
+{
+    pub fn new(datetime: DateTime<Z>) -> Schedule<Z> {
+        Schedule {
+            inner: Some(datetime),
+        }
+    }
+    pub fn default() -> Schedule<Z> {
+        Schedule { inner: None }
+    }
+}
+
+impl<Z> AsScheduleRef<Z> for Schedule<Z>
+where
+    Z: TimeZone + 'static,
+{
+    fn as_ref(&self) -> ScheduleRef<Z> {
+        match &self.inner {
+            None => ScheduleRef::default(),
+            Some(datetime) => ScheduleRef::new(&datetime),
+        }
+    }
+}
+
+impl<Z> AsPrintableScheduleRef<Z> for Schedule<Z>
+where
+    Z: TimeZone + 'static,
+    Z::Offset: Display,
+{
+}
+
+pub fn get_next_schedule<Z>(cron: &str, timezone: Z) -> Schedule<Z>
+where
+    Z: TimeZone,
+{
+    let schedule = cron::Schedule::from_str(cron).unwrap();
+    for datetime in schedule.upcoming(timezone).take(1) {
+        return Schedule::new(datetime);
+    }
+    return Schedule::default();
 }
