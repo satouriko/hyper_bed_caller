@@ -1,3 +1,4 @@
+use crate::store::Alarm;
 use rtdlib::types::*;
 use std::convert::TryInto;
 
@@ -53,6 +54,43 @@ pub fn f_bad_cron_expression(f: &mut RTDFormattedTextBuilder) -> &mut RTDFormatt
         .length(HELP_TEXT.encode_utf16().count().try_into().unwrap())
         .build();
     let entities = vec![url_entity];
+    f.entities(entities);
+    return f;
+}
+
+pub fn f_list_alarms<'a>(
+    f: &'a mut RTDFormattedTextBuilder,
+    alarms: &Vec<Alarm>,
+) -> &'a mut RTDFormattedTextBuilder {
+    let mut text = String::from("");
+    let mut entities: Vec<TextEntity> = vec![];
+    for (i, alarm) in alarms.iter().enumerate() {
+        let num = format!("[{}]", i);
+        let bold = TextEntityTypeBold::builder().build();
+        let bold_entity = TextEntity::builder()
+            .type_(TextEntityType::Bold(bold))
+            .offset(text.encode_utf16().count().try_into().unwrap())
+            .length(num.encode_utf16().count().try_into().unwrap())
+            .build();
+        text += &format!("{}  ", num);
+        entities.push(bold_entity);
+        if alarm.title != "" {
+            text += &format!("{}  ", alarm.title);
+        }
+        if alarm.is_strict {
+            text += "#严格模式  ";
+        }
+        let code = TextEntityTypeCode::builder().build();
+        let code_entity = TextEntity::builder()
+            .type_(TextEntityType::Code(code))
+            .offset(text.encode_utf16().count().try_into().unwrap())
+            .length(alarm.cron.encode_utf16().count().try_into().unwrap())
+            .build();
+        text += &alarm.cron;
+        entities.push(code_entity);
+        text += "\n";
+    }
+    f.text(text);
     f.entities(entities);
     return f;
 }

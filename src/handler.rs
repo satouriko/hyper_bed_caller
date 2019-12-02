@@ -246,19 +246,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 let state = store.state();
                                 let user_alarms = state.alarms.get(&message.sender_user_id());
                                 let to_send = match user_alarms {
-                                    None => String::from("还一个闹钟都没有呢。"),
+                                    None => {
+                                        build_plain_message(String::from("还一个闹钟都没有呢。"))
+                                    }
                                     Some(alarms) => {
-                                        let mut to_send = String::from("");
-                                        for (i, alarm) in alarms.borrow().iter().enumerate() {
-                                            to_send += &format!(
-                                                "[{}] {} {} {}\n",
-                                                i, alarm.cron, alarm.title, alarm.is_strict
-                                            );
-                                        }
-                                        to_send
+                                        build_fmt_message(|f| f_list_alarms(f, &alarms.borrow()))
                                     }
                                 };
-                                reply_text_msg(build_plain_message(to_send));
+                                reply_text_msg(to_send);
                             }
                             "#disalarm" => {
                                 let id = cmd.arg().parse::<usize>();
