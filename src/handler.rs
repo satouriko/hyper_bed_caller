@@ -133,6 +133,83 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                         }
                         let text = message_text.text().text();
                         let cmd = parse_command_msg(text);
+                        let handle_alarm = |is_strict: bool| {
+                            let tz = {
+                                let state = store.state();
+                                let tz = state.timezones.get(&message.sender_user_id());
+                                match tz {
+                                    Some(tz) => {
+                                        let tz = tz.parse::<Tz>().unwrap();
+                                        Some(tz)
+                                    }
+                                    None => None,
+                                }
+                            };
+                            let alarm_args = {
+                                match tz {
+                                    Some(tz) => parse_alarm_args(cmd.arg(), &tz),
+                                    None => parse_alarm_args(cmd.arg(), &chrono::Local),
+                                }
+                            };
+                            let to_send = match alarm_args {
+                                Err(error) => Err(error),
+                                Ok(cron_args) => {
+                                    let alarm = Alarm {
+                                        user_id: message.sender_user_id(),
+                                        chat_id: message.chat_id(),
+                                        cron: String::from(cron_args.cron()),
+                                        title: String::from(cron_args.title()),
+                                        is_strict,
+                                    };
+                                    let mut state = store.state();
+                                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                                    if let None = user_alarms {
+                                        state
+                                            .alarms
+                                            .insert(message.sender_user_id(), RefCell::new(vec![]));
+                                    }
+                                    let mut user_alarms = state
+                                        .alarms
+                                        .get(&message.sender_user_id())
+                                        .unwrap()
+                                        .borrow_mut();
+                                    user_alarms.push(alarm);
+                                    let next_alarm = match tz {
+                                        Some(tz) => {
+                                            get_next_schedule(cron_args.cron(), tz).to_string()
+                                        }
+                                        None => get_next_schedule(
+                                            cron_args.cron(),
+                                            chrono::Local.clone(),
+                                        )
+                                        .to_string(),
+                                    };
+                                    let next_alarm = match next_alarm {
+                                        Some(next_alarm) => format!("下次闹钟时间：{}", next_alarm),
+                                        None => format!("但是它看起来并不会响。"),
+                                    };
+                                    Ok(match cron_args.title() {
+                                        "" => format!("闹钟已设置。{}", next_alarm),
+                                        _ => format!(
+                                            "闹钟 {} 已设置。{}",
+                                            cron_args.title(),
+                                            next_alarm
+                                        ),
+                                    })
+                                }
+                            };
+                            match to_send {
+                                Ok(to_send) => {
+                                    store.save().expect("Failed to save state");
+                                    reply_text_msg(build_plain_message(to_send));
+                                }
+                                Err(_) => {
+                                    reply_text_msg(build_fmt_message(|f| {
+                                        f_bad_arguments(f, "无效的表达式。")
+                                    }));
+                                }
+                            }
+                        };
                         match cmd.cmd() {
                             "#help" => {
                                 reply_text_msg(build_fmt_message(f_help_message));
@@ -167,85 +244,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 reply_text_msg(build_plain_message(to_send));
                             }
                             "#alarm" => {
-                                let tz = {
-                                    let state = store.state();
-                                    let tz = state.timezones.get(&message.sender_user_id());
-                                    match tz {
-                                        Some(tz) => {
-                                            let tz = tz.parse::<Tz>().unwrap();
-                                            Some(tz)
-                                        }
-                                        None => None,
-                                    }
-                                };
-                                let alarm_args = {
-                                    match tz {
-                                        Some(tz) => parse_alarm_args(cmd.arg(), &tz),
-                                        None => parse_alarm_args(cmd.arg(), &chrono::Local),
-                                    }
-                                };
-                                let to_send = match alarm_args {
-                                    Err(error) => Err(error),
-                                    Ok(cron_args) => {
-                                        let alarm = Alarm {
-                                            user_id: message.sender_user_id(),
-                                            chat_id: message.chat_id(),
-                                            cron: String::from(cron_args.cron()),
-                                            title: String::from(cron_args.title()),
-                                            is_strict: false,
-                                        };
-                                        let mut state = store.state();
-                                        let user_alarms =
-                                            state.alarms.get(&message.sender_user_id());
-                                        if let None = user_alarms {
-                                            state.alarms.insert(
-                                                message.sender_user_id(),
-                                                RefCell::new(vec![]),
-                                            );
-                                        }
-                                        let mut user_alarms = state
-                                            .alarms
-                                            .get(&message.sender_user_id())
-                                            .unwrap()
-                                            .borrow_mut();
-                                        user_alarms.push(alarm);
-                                        let next_alarm = match tz {
-                                            Some(tz) => {
-                                                get_next_schedule(cron_args.cron(), tz).to_string()
-                                            }
-                                            None => get_next_schedule(
-                                                cron_args.cron(),
-                                                chrono::Local.clone(),
-                                            )
-                                            .to_string(),
-                                        };
-                                        let next_alarm = match next_alarm {
-                                            Some(next_alarm) => {
-                                                format!("下次闹钟时间：{}", next_alarm)
-                                            }
-                                            None => format!("但是它看起来并不会响。"),
-                                        };
-                                        Ok(match cron_args.title() {
-                                            "" => format!("闹钟已设置。{}", next_alarm),
-                                            _ => format!(
-                                                "闹钟 {} 已设置。{}",
-                                                cron_args.title(),
-                                                next_alarm
-                                            ),
-                                        })
-                                    }
-                                };
-                                match to_send {
-                                    Ok(to_send) => {
-                                        store.save().expect("Failed to save state");
-                                        reply_text_msg(build_plain_message(to_send));
-                                    }
-                                    Err(_) => {
-                                        reply_text_msg(build_fmt_message(|f| {
-                                            f_bad_arguments(f, "无效的表达式。")
-                                        }));
-                                    }
-                                }
+                                handle_alarm(false);
+                            }
+                            "#alarm!" => {
+                                handle_alarm(true);
                             }
                             "#list" => {
                                 let state = store.state();
@@ -292,6 +294,47 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                             } else {
                                                 alarms.remove(id);
                                                 String::from("闹钟已移除。")
+                                            }
+                                        }
+                                    }
+                                };
+                                store.save().expect("Failed to save state");
+                                reply_text_msg(build_plain_message(to_send));
+                            }
+                            "#strict" => {
+                                let id = cmd.arg().parse::<usize>();
+                                if let Err(_) = id {
+                                    reply_text_msg(build_fmt_message(|f| {
+                                        f_bad_arguments(f, "闹钟编号格式有误。")
+                                    }));
+                                    continue;
+                                }
+                                let id = id.unwrap();
+                                let to_send = {
+                                    let state = store.state();
+                                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                                    match user_alarms {
+                                        None => String::from("没有这个编号的闹钟。"),
+                                        Some(alarms) => {
+                                            let mut alarms = alarms.borrow_mut();
+                                            if id >= alarms.len() {
+                                                String::from("没有这个编号的闹钟。")
+                                            } else {
+                                                alarms[id].is_strict = !alarms[id].is_strict;
+                                                let alarm_text = match alarms[id].title.as_str() {
+                                                    "" => format!("[{}]", id),
+                                                    title => format!("[{}] {}", id, title),
+                                                };
+                                                match alarms[id].is_strict {
+                                                    true => format!(
+                                                        "已变更闹钟 {} 为严格模式。",
+                                                        alarm_text
+                                                    ),
+                                                    false => format!(
+                                                        "已取消闹钟 {} 的严格模式。",
+                                                        alarm_text
+                                                    ),
+                                                }
                                             }
                                         }
                                     }
