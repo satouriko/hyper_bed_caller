@@ -44,13 +44,15 @@ pub fn f_help_message(f: &mut RTDFormattedTextBuilder) -> &mut RTDFormattedTextB
     return f;
 }
 
-pub fn f_bad_cron_expression(f: &mut RTDFormattedTextBuilder) -> &mut RTDFormattedTextBuilder {
-    let text = "无效的表达式。";
-    f.text(format!("{}{}", text, HELP_TEXT));
+pub fn f_bad_arguments<T>(f: &mut RTDFormattedTextBuilder, text: T) -> &mut RTDFormattedTextBuilder
+where
+    T: AsRef<str>,
+{
+    f.text(format!("{}{}", text.as_ref(), HELP_TEXT));
     let url = TextEntityTypeTextUrl::builder().url(HELP_URL).build();
     let url_entity = TextEntity::builder()
         .type_(TextEntityType::TextUrl(url))
-        .offset(text.encode_utf16().count().try_into().unwrap())
+        .offset(text.as_ref().encode_utf16().count().try_into().unwrap())
         .length(HELP_TEXT.encode_utf16().count().try_into().unwrap())
         .build();
     let entities = vec![url_entity];

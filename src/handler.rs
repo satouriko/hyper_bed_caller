@@ -5,7 +5,10 @@ use chrono;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
 
-pub fn initialize_app(path: &str) -> (Arc<Tdlib>, Arc<Store>) {
+pub fn initialize_app<T>(path: T) -> (Arc<Tdlib>, Arc<Store>)
+where
+    T: AsRef<str>,
+{
     let tdlib = Arc::new(Tdlib::new());
     let set_online = SetOption::builder()
         .name("online")
@@ -238,7 +241,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         reply_text_msg(build_plain_message(to_send));
                                     }
                                     Err(_) => {
-                                        reply_text_msg(build_fmt_message(f_bad_cron_expression));
+                                        reply_text_msg(build_fmt_message(|f| {
+                                            f_bad_arguments(f, "无效的表达式。")
+                                        }));
                                     }
                                 }
                             }
@@ -258,7 +263,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                             "#disalarm" => {
                                 let id = cmd.arg().parse::<usize>();
                                 if let Err(_) = id {
-                                    reply_text_msg(build_plain_message("闹钟编号格式有误。"));
+                                    reply_text_msg(build_fmt_message(|f| {
+                                        f_bad_arguments(f, "闹钟编号格式有误。")
+                                    }));
                                     continue;
                                 }
                                 let id = id.unwrap();

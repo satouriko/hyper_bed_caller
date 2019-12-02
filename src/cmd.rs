@@ -49,8 +49,11 @@ impl CronArgs<'_> {
     }
 }
 
-fn test_cron(input: &str) -> Result<String, &'static str> {
-    let string = format!("0 {}", input);
+fn test_cron<T>(input: T) -> Result<String, &'static str>
+where
+    T: AsRef<str>,
+{
+    let string = format!("0 {}", input.as_ref());
     let test = Schedule::from_str(string.as_str());
     match test {
         Ok(_) => Ok(string),
@@ -58,12 +61,13 @@ fn test_cron(input: &str) -> Result<String, &'static str> {
     }
 }
 
-fn test_time_str<Z>(input: &str, tz: &Z) -> Result<String, &'static str>
+fn test_time_str<T, Z>(input: T, tz: &Z) -> Result<String, &'static str>
 where
+    T: AsRef<str>,
     Z: TimeZone,
     Z::Offset: Display,
 {
-    let input = input.trim();
+    let input = input.as_ref().trim();
     let first_space = input.find(char::is_whitespace);
     let time_str = match first_space {
         Some(first_space) => &input[..first_space],

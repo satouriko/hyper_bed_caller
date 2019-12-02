@@ -43,14 +43,17 @@ impl Store {
         fs::write(self.path.as_str(), &json)?;
         Ok(())
     }
-    pub fn new(path: &str) -> Store {
-        let contents = fs::read_to_string(path);
+    pub fn new<T>(path: T) -> Store
+    where
+        T: AsRef<str>,
+    {
+        let contents = fs::read_to_string(path.as_ref());
         let state = match contents {
             Err(_) => State::new(),
             Ok(string) => serde_json::from_str(string.as_str()).expect("Bad JSON"),
         };
         let store = Store {
-            path: String::from(path),
+            path: String::from(path.as_ref()),
             state: Mutex::new(state.clone()),
         };
         store.save().unwrap();
