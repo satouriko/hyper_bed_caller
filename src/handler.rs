@@ -22,6 +22,13 @@ where
 }
 
 pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
+  let mut user_name = String::default();
+  let phone_number = env::var("PHONE").expect("Unknown env phone number");
+  let phone_number = if phone_number.starts_with("+") {
+    phone_number[1..].to_string()
+  } else {
+    phone_number
+  };
   thread::spawn(move || loop {
     let json = tdlib.receive(60.0);
     if let None = json {
@@ -38,8 +45,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
       "updateAuthorizationState" => {
         let state: UpdateAuthorizationState =
           serde_json::from_str(json.as_str()).unwrap_or_default();
-        let req: Option<Box<dyn RObject>> = match state.authorization_state() {
-          AuthorizationState::WaitTdlibParameters(_) => Some(Box::new(
+        let req: Box<dyn RObject> = match state.authorization_state() {
+          AuthorizationState::WaitTdlibParameters(_) => Box::new(
             SetTdlibParameters::builder()
               .parameters(
                 TdlibParameters::builder()
@@ -56,15 +63,15 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   .build(),
               )
               .build(),
-          )),
+          ),
           AuthorizationState::WaitEncryptionKey(_) => {
-            Some(Box::new(SetDatabaseEncryptionKey::builder().build()))
+            Box::new(SetDatabaseEncryptionKey::builder().build())
           }
-          AuthorizationState::WaitPhoneNumber(_) => Some(Box::new(
+          AuthorizationState::WaitPhoneNumber(_) => Box::new(
             SetAuthenticationPhoneNumber::builder()
-              .phone_number(env::var("PHONE").expect("Unknown env phone number"))
+              .phone_number(&phone_number)
               .build(),
-          )),
+          ),
           AuthorizationState::WaitCode(code) => {
             let prompt = match code.code_info().type_() {
               AuthenticationCodeType::TelegramMessage(_) => {
@@ -80,17 +87,20 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             println!("Please type authentication code:");
             let mut input = String::new();
             io::stdin().read_line(&mut input).expect("Bad input");
-            Some(Box::new(
-              CheckAuthenticationCode::builder().code(input).build(),
-            ))
+            Box::new(CheckAuthenticationCode::builder().code(input).build())
           }
+          AuthorizationState::Ready(_) => Box::new(GetMe::builder().build()),
           _ => {
             println!("{}\t{}", td_type, json);
-            None
+            panic!("Unsupported authorization");
           }
         };
-        if let Some(req) = req {
-          tdlib.send(&req.to_json().expect("Bad JSON"))
+        tdlib.send(&req.to_json().expect("Bad JSON"));
+      }
+      "user" => {
+        let user: User = serde_json::from_str(json.as_str()).unwrap_or_default();
+        if user.phone_number().as_str() == phone_number.as_str() {
+          user_name = user.username().to_string();
         }
       }
       "updateNewMessage" => {
@@ -100,7 +110,6 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         if message.is_outgoing() {
           continue;
         }
-        println!("{}", json);
         let reply_text_msg = |msg: InputMessageContent| {
           let req = SendMessage::builder()
             .chat_id(message.chat_id())
@@ -112,9 +121,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         match message.content() {
           MessageContent::MessageText(message_text) => {
             let text = message_text.text().text();
-            if text == "/help"
-              || text == &format!("/help@{}", env::var("BOT_USERNAME").unwrap_or_default())
-            {
+            if text == "/help" || text == &format!("/help@{}", user_name) {
               reply_text_msg(build_fmt_message(f_help_message));
               continue;
             }
@@ -404,8 +411,6 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
 pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
   thread::spawn(move || {
     thread::sleep(time::Duration::from_secs(5));
-    let get_me = GetMe::builder().build();
-    tdlib.send(&get_me.to_json().expect("Bad JSON"));
-    println!("{:?}", store.state());
+    println!("{:?} {:?}", tdlib, store.state());
   })
 }
