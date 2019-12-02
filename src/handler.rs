@@ -115,6 +115,16 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 match message.content() {
                     MessageContent::MessageText(message_text) => {
                         let text = message_text.text().text();
+                        if text == "/help"
+                            || text
+                                == &format!(
+                                    "/help@{}",
+                                    env::var("BOT_USERNAME").unwrap_or_default()
+                                )
+                        {
+                            reply_text_msg(build_fmt_message(f_help_message));
+                            continue;
+                        }
                         if !text.starts_with("#") {
                             continue;
                         }
@@ -154,18 +164,25 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 reply_text_msg(build_plain_message(to_send));
                             }
                             "#alarm" => {
-                                let alarm_args = {
+                                let tz = {
                                     let state = store.state();
                                     let tz = state.timezones.get(&message.sender_user_id());
                                     match tz {
                                         Some(tz) => {
-                                            parse_alarm_args(cmd.arg(), &tz.parse::<Tz>().unwrap())
+                                            let tz = tz.parse::<Tz>().unwrap();
+                                            Some(tz)
                                         }
+                                        None => None,
+                                    }
+                                };
+                                let alarm_args = {
+                                    match tz {
+                                        Some(tz) => parse_alarm_args(cmd.arg(), &tz),
                                         None => parse_alarm_args(cmd.arg(), &chrono::Local),
                                     }
                                 };
                                 let to_send = match alarm_args {
-                                    Err(error) => String::from(error),
+                                    Err(error) => Err(error),
                                     Ok(cron_args) => {
                                         let alarm = Alarm {
                                             user_id: message.sender_user_id(),
@@ -189,15 +206,41 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                             .unwrap()
                                             .borrow_mut();
                                         user_alarms.push(alarm);
-                                        format!(
-                                            "cron: {}\ntitle: {}",
-                                            cron_args.cron(),
-                                            cron_args.title()
-                                        )
+                                        let next_alarm = match tz {
+                                            Some(tz) => {
+                                                get_next_schedule(cron_args.cron(), tz).to_string()
+                                            }
+                                            None => get_next_schedule(
+                                                cron_args.cron(),
+                                                chrono::Local.clone(),
+                                            )
+                                            .to_string(),
+                                        };
+                                        let next_alarm = match next_alarm {
+                                            Some(next_alarm) => {
+                                                format!("下次闹钟时间：{}", next_alarm)
+                                            }
+                                            None => format!("但是它看起来并不会响。"),
+                                        };
+                                        Ok(match cron_args.title() {
+                                            "" => format!("闹钟已设置。{}", next_alarm),
+                                            _ => format!(
+                                                "闹钟 {} 已设置。{}",
+                                                cron_args.title(),
+                                                next_alarm
+                                            ),
+                                        })
                                     }
                                 };
-                                store.save().expect("Failed to save state");
-                                reply_text_msg(build_plain_message(to_send));
+                                match to_send {
+                                    Ok(to_send) => {
+                                        store.save().expect("Failed to save state");
+                                        reply_text_msg(build_plain_message(to_send));
+                                    }
+                                    Err(_) => {
+                                        reply_text_msg(build_fmt_message(f_bad_cron_expression));
+                                    }
+                                }
                             }
                             "#list" => {
                                 let state = store.state();
@@ -278,8 +321,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 reply_text_msg(build_plain_message(to_send));
                             }
                             _ => {
-                                let to_send = format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
-                                reply_text_msg(build_plain_message(to_send));
+                                continue;
                             }
                         }
                     }

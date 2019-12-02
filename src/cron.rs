@@ -71,7 +71,7 @@ where
 {
     fn to_string(&self) -> Option<String> {
         match self.as_ref().inner.as_ref() {
-            Some(schedule) => Some(schedule.to_rfc3339()),
+            Some(schedule) => Some(schedule.format("%F %R%:z").to_string()),
             None => None,
         }
     }
