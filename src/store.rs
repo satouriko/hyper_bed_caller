@@ -12,6 +12,8 @@ pub struct Alarm {
   pub cron: String,
   pub title: String,
   pub is_strict: bool,
+  pub is_oneoff: bool,
+  pub reschedule: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

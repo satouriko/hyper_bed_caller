@@ -1,4 +1,4 @@
-use crate::cron::{get_next_schedule, AsScheduleRef};
+use crate::alarm::{get_next_schedule, AsScheduleRef};
 use crate::store::Alarm;
 use chrono::TimeZone;
 use rtdlib::types::*;
@@ -70,7 +70,7 @@ pub fn f_list_alarms<'a, Z>(
 where
   Z: TimeZone + 'static,
 {
-  let mut text = String::from("");
+  let mut text = String::default();
   let mut entities: Vec<TextEntity> = vec![];
   let mut have_expired = false;
   for (i, alarm) in alarms.iter().enumerate() {

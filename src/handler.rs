@@ -1,6 +1,6 @@
 use std::{cell::RefCell, env, io, sync::Arc, thread, time};
 extern crate uname;
-use crate::{cmd::*, cron::*, fmt::*, store::*};
+use crate::{alarm::*, cmd::*, fmt::*, store::*};
 use chrono;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
@@ -150,6 +150,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     cron: String::from(cron_args.cron()),
                     title: String::from(cron_args.title()),
                     is_strict,
+                    is_oneoff: false,
+                    reschedule: String::default(),
                   };
                   let mut state = store.state();
                   let user_alarms = state.alarms.get(&message.sender_user_id());

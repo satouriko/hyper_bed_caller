@@ -29,7 +29,7 @@ where
   }
   pub fn alarm_title(&self) -> String {
     match &self.inner {
-      None => String::from(""),
+      None => String::default(),
       Some(alarm_schedule) => alarm_schedule.1.title.clone(),
     }
   }
