@@ -1,6 +1,6 @@
 use std::{cell::RefCell, env, io, sync::Arc, thread, time};
 extern crate uname;
-use crate::{cmd::*, cron::*, store::*};
+use crate::{cmd::*, cron::*, fmt::*, store::*};
 use chrono;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
@@ -104,15 +104,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     continue;
                 }
                 println!("{}", json);
-                let reply_text_msg = |to_send: &str| {
+                let reply_text_msg = |msg: InputMessageContent| {
                     let req = SendMessage::builder()
                         .chat_id(message.chat_id())
-                        .input_message_content(InputMessageContent::InputMessageText(
-                            InputMessageText::builder()
-                                .text(FormattedText::builder().text(to_send).build())
-                                .clear_draft(true)
-                                .build(),
-                        ))
+                        .input_message_content(msg)
                         .reply_to_message_id(message.id())
                         .build();
                     tdlib.send(&req.to_json().expect("Bad JSON"));
@@ -127,9 +122,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                         let cmd = parse_command_msg(text);
                         match cmd.cmd() {
                             "#help" => {
-                                reply_text_msg(
-                                    "https://telegra.ph/%E4%BD%BF%E7%94%A8%E5%B8%AE%E5%8A%A9-11-29",
-                                );
+                                reply_text_msg(build_fmt_message(f_help_message));
                             }
                             "#timezone" => {
                                 if cmd.arg() == "" {
@@ -139,7 +132,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         Some(tz) => tz.clone(),
                                         None => chrono::Local::now().format("%Z").to_string(),
                                     };
-                                    reply_text_msg(&format!("当前时区：{}", current_tz_str));
+                                    reply_text_msg(build_plain_message(format!(
+                                        "当前时区：{}",
+                                        current_tz_str
+                                    )));
                                     continue;
                                 }
                                 let tz = cmd.arg().parse::<Tz>();
@@ -155,7 +151,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                             "#alarm" => {
                                 let alarm_args = {
@@ -201,7 +197,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                             "#list" => {
                                 let state = store.state();
@@ -219,12 +215,12 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                         to_send
                                     }
                                 };
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                             "#disalarm" => {
                                 let id = cmd.arg().parse::<usize>();
                                 if let Err(_) = id {
-                                    reply_text_msg("闹钟编号格式有误。");
+                                    reply_text_msg(build_plain_message("闹钟编号格式有误。"));
                                     continue;
                                 }
                                 let id = id.unwrap();
@@ -245,7 +241,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                             "#next" => {
                                 let state = store.state();
@@ -279,11 +275,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     }
                                     None => format!("没有要响的闹钟了。"),
                                 };
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                             _ => {
                                 let to_send = format!("cmd: {}\nargs: {}", cmd.cmd(), cmd.arg());
-                                reply_text_msg(&to_send);
+                                reply_text_msg(build_plain_message(to_send));
                             }
                         }
                     }
