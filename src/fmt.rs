@@ -1,4 +1,6 @@
+use crate::cron::{get_next_schedule, AsScheduleRef};
 use crate::store::Alarm;
+use chrono::TimeZone;
 use rtdlib::types::*;
 use std::convert::TryInto;
 
@@ -60,12 +62,17 @@ where
     return f;
 }
 
-pub fn f_list_alarms<'a>(
+pub fn f_list_alarms<'a, Z>(
     f: &'a mut RTDFormattedTextBuilder,
     alarms: &Vec<Alarm>,
-) -> &'a mut RTDFormattedTextBuilder {
+    tz: Z,
+) -> &'a mut RTDFormattedTextBuilder
+where
+    Z: TimeZone + 'static,
+{
     let mut text = String::from("");
     let mut entities: Vec<TextEntity> = vec![];
+    let mut have_expired = false;
     for (i, alarm) in alarms.iter().enumerate() {
         let num = format!("[{}]", i);
         let bold = TextEntityTypeBold::builder().build();
@@ -76,21 +83,30 @@ pub fn f_list_alarms<'a>(
             .build();
         text += &format!("{}  ", num);
         entities.push(bold_entity);
+        let next_alarm = get_next_schedule(&alarm.cron, tz.clone());
+        if !next_alarm.has_schedule() {
+            text += "#已过期  ";
+            have_expired = true;
+        }
         if alarm.title != "" {
             text += &format!("{}  ", alarm.title);
         }
         if alarm.is_strict {
             text += "#严格模式  ";
         }
+        let cron = &alarm.cron[2..]; // remove zero for 'second'
         let code = TextEntityTypeCode::builder().build();
         let code_entity = TextEntity::builder()
             .type_(TextEntityType::Code(code))
             .offset(text.encode_utf16().count().try_into().unwrap())
-            .length(alarm.cron.encode_utf16().count().try_into().unwrap())
+            .length(cron.encode_utf16().count().try_into().unwrap())
             .build();
-        text += &alarm.cron;
+        text += cron;
         entities.push(code_entity);
         text += "\n";
+    }
+    if have_expired {
+        text += "\nTip：使用命令 #purge 清除所有已过期的闹钟。"
     }
     f.text(text);
     f.entities(entities);

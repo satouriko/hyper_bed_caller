@@ -56,6 +56,12 @@ where
     Z: TimeZone + 'static,
 {
     fn as_ref(&self) -> ScheduleRef<Z>;
+    fn has_schedule(&self) -> bool {
+        match self.as_ref().inner.as_ref() {
+            Some(_) => true,
+            None => false,
+        }
+    }
     fn to_timestamp(&self) -> i64 {
         match self.as_ref().inner.as_ref() {
             Some(schedule) => schedule.timestamp(),
@@ -162,11 +168,12 @@ where
 {
 }
 
-pub fn get_next_schedule<Z>(cron: &str, timezone: Z) -> Schedule<Z>
+pub fn get_next_schedule<T, Z>(cron: T, timezone: Z) -> Schedule<Z>
 where
+    T: AsRef<str>,
     Z: TimeZone,
 {
-    let schedule = cron::Schedule::from_str(cron).unwrap();
+    let schedule = cron::Schedule::from_str(cron.as_ref()).unwrap();
     for datetime in schedule.upcoming(timezone).take(1) {
         return Schedule::new(datetime);
     }

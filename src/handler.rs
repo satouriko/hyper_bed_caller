@@ -249,14 +249,25 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                             }
                             "#list" => {
                                 let state = store.state();
+                                let tz = state.timezones.get(&message.sender_user_id());
+                                let tz = match tz {
+                                    Some(tz) => {
+                                        let tz = tz.parse::<Tz>().unwrap();
+                                        Some(tz)
+                                    }
+                                    None => None,
+                                };
                                 let user_alarms = state.alarms.get(&message.sender_user_id());
                                 let to_send = match user_alarms {
-                                    None => {
-                                        build_plain_message(String::from("还一个闹钟都没有呢。"))
-                                    }
-                                    Some(alarms) => {
-                                        build_fmt_message(|f| f_list_alarms(f, &alarms.borrow()))
-                                    }
+                                    None => build_plain_message("还一个闹钟都没有呢。"),
+                                    Some(alarms) => build_fmt_message(|f| match tz {
+                                        Some(tz) => f_list_alarms(f, &alarms.borrow(), tz),
+                                        None => f_list_alarms(
+                                            f,
+                                            &alarms.borrow(),
+                                            chrono::Local.clone(),
+                                        ),
+                                    }),
                                 };
                                 reply_text_msg(to_send);
                             }
@@ -321,6 +332,64 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     None => format!("没有要响的闹钟了。"),
                                 };
                                 reply_text_msg(build_plain_message(to_send));
+                            }
+                            "#purge" => {
+                                let purged_cnt = {
+                                    let state = store.state();
+                                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                                    if let None = user_alarms {
+                                        reply_text_msg(build_plain_message("还一个闹钟都没有呢。"));
+                                        continue;
+                                    }
+                                    let mut alarms = user_alarms.unwrap().borrow_mut();
+                                    let tz = state.timezones.get(&message.sender_user_id());
+                                    let tz = match tz {
+                                        Some(tz) => {
+                                            let tz = tz.parse::<Tz>().unwrap();
+                                            Some(tz)
+                                        }
+                                        None => None,
+                                    };
+                                    // awaiting https://doc.rust-lang.org/std/vec/struct.Vec.html#method.drain_filter
+                                    let mut i = 0;
+                                    let mut purged_cnt = 0;
+                                    while i != alarms.len() {
+                                        match tz {
+                                            Some(tz) => {
+                                                let next_alarm =
+                                                    get_next_schedule(&alarms[i].cron, tz);
+                                                if !next_alarm.has_schedule() {
+                                                    alarms.remove(i);
+                                                    purged_cnt += 1;
+                                                } else {
+                                                    i += 1;
+                                                }
+                                            }
+                                            None => {
+                                                let next_alarm = get_next_schedule(
+                                                    &alarms[i].cron,
+                                                    chrono::Local.clone(),
+                                                );
+                                                if !next_alarm.has_schedule() {
+                                                    alarms.remove(i);
+                                                    purged_cnt += 1;
+                                                } else {
+                                                    i += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    purged_cnt
+                                };
+                                if purged_cnt > 0 {
+                                    store.save().expect("Failed to save state");
+                                    reply_text_msg(build_plain_message(format!(
+                                        "已清除 {} 个闹钟。",
+                                        purged_cnt
+                                    )));
+                                } else {
+                                    reply_text_msg(build_plain_message("没有过期的闹钟。"));
+                                }
                             }
                             _ => {
                                 continue;
