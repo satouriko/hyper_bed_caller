@@ -133,7 +133,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             let handle_alarm = |is_strict: bool| {
               let tz = {
                 let state = store.state();
-                let tz = state.timezones.get(&message.sender_user_id());
+                let tz = state.timezone.get(&message.sender_user_id());
                 match tz {
                   Some(tz) => {
                     let tz = tz.parse::<Tz>().unwrap();
@@ -151,15 +151,13 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               let to_send = match alarm_args {
                 Err(error) => Err(error),
                 Ok(cron_args) => {
-                  let alarm = Alarm {
-                    user_id: message.sender_user_id(),
-                    chat_id: message.chat_id(),
-                    cron: String::from(cron_args.cron()),
-                    title: String::from(cron_args.title()),
+                  let alarm = Alarm::new(
+                    message.sender_user_id(),
+                    message.chat_id(),
+                    cron_args.cron(),
+                    cron_args.title(),
                     is_strict,
-                    is_oneoff: false,
-                    reschedule: String::default(),
-                  };
+                  );
                   let mut state = store.state();
                   let user_alarms = state.alarms.get(&message.sender_user_id());
                   if let None = user_alarms {
@@ -204,7 +202,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               "#timezone" => {
                 if cmd.arg() == "" {
                   let state = store.state();
-                  let tz = state.timezones.get(&message.sender_user_id());
+                  let tz = state.timezone.get(&message.sender_user_id());
                   let current_tz_str = match tz {
                     Some(tz) => tz.clone(),
                     None => chrono::Local::now().format("%Z").to_string(),
@@ -218,7 +216,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   Ok(_) => {
                     let mut state = store.state();
                     state
-                      .timezones
+                      .timezone
                       .insert(message.sender_user_id(), String::from(cmd.arg()));
                     build_plain_message(format!("时区已更新为 {}。", cmd.arg()))
                   }
@@ -234,7 +232,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
               "#list" => {
                 let state = store.state();
-                let tz = state.timezones.get(&message.sender_user_id());
+                let tz = state.timezone.get(&message.sender_user_id());
                 let tz = match tz {
                   Some(tz) => {
                     let tz = tz.parse::<Tz>().unwrap();
@@ -322,7 +320,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   continue;
                 }
                 let alarms = user_alarms.unwrap().borrow();
-                let tz = state.timezones.get(&message.sender_user_id());
+                let tz = state.timezone.get(&message.sender_user_id());
                 let (tz_str, alarm_title) = match tz {
                   Some(tz) => {
                     let next_alarm = get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap());
@@ -348,7 +346,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     continue;
                   }
                   let mut alarms = user_alarms.unwrap().borrow_mut();
-                  let tz = state.timezones.get(&message.sender_user_id());
+                  let tz = state.timezone.get(&message.sender_user_id());
                   let tz = match tz {
                     Some(tz) => {
                       let tz = tz.parse::<Tz>().unwrap();
@@ -401,6 +399,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           _ => (),
         }
       }
+      "updateCall" => {}
       _ => {
         println!("{}\t{}", td_type, json);
       }
@@ -410,7 +409,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
 
 pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
   thread::spawn(move || {
-    thread::sleep(time::Duration::from_secs(5));
+    thread::sleep(time::Duration::from_secs(10));
     println!("{:?} {:?}", tdlib, store.state());
   })
 }
