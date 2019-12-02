@@ -230,18 +230,20 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 }
                                 let tz = cmd.arg().parse::<Tz>();
                                 let to_send = match tz {
-                                    Err(_) => String::from("没有这个时区。"),
+                                    Err(_) => {
+                                        build_fmt_message(|f| f_bad_arguments(f, "没有这个时区。"))
+                                    }
                                     Ok(_) => {
                                         let mut state = store.state();
                                         state.timezones.insert(
                                             message.sender_user_id(),
                                             String::from(cmd.arg()),
                                         );
-                                        format!("时区已更新为 {}。", cmd.arg())
+                                        build_plain_message(format!("时区已更新为 {}。", cmd.arg()))
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(build_plain_message(to_send));
+                                reply_text_msg(to_send);
                             }
                             "#alarm" => {
                                 handle_alarm(false);
@@ -286,20 +288,24 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     let state = store.state();
                                     let user_alarms = state.alarms.get(&message.sender_user_id());
                                     match user_alarms {
-                                        None => String::from("没有这个编号的闹钟。"),
+                                        None => build_fmt_message(|f| {
+                                            f_bad_arguments(f, "没有这个编号的闹钟。")
+                                        }),
                                         Some(alarms) => {
                                             let mut alarms = alarms.borrow_mut();
                                             if id >= alarms.len() {
-                                                String::from("没有这个编号的闹钟。")
+                                                build_fmt_message(|f| {
+                                                    f_bad_arguments(f, "没有这个编号的闹钟。")
+                                                })
                                             } else {
                                                 alarms.remove(id);
-                                                String::from("闹钟已移除。")
+                                                build_plain_message("闹钟已移除。")
                                             }
                                         }
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(build_plain_message(to_send));
+                                reply_text_msg(to_send);
                             }
                             "#strict" => {
                                 let id = cmd.arg().parse::<usize>();
@@ -314,18 +320,22 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                     let state = store.state();
                                     let user_alarms = state.alarms.get(&message.sender_user_id());
                                     match user_alarms {
-                                        None => String::from("没有这个编号的闹钟。"),
+                                        None => build_fmt_message(|f| {
+                                            f_bad_arguments(f, "没有这个编号的闹钟。")
+                                        }),
                                         Some(alarms) => {
                                             let mut alarms = alarms.borrow_mut();
                                             if id >= alarms.len() {
-                                                String::from("没有这个编号的闹钟。")
+                                                build_fmt_message(|f| {
+                                                    f_bad_arguments(f, "没有这个编号的闹钟。")
+                                                })
                                             } else {
                                                 alarms[id].is_strict = !alarms[id].is_strict;
                                                 let alarm_text = match alarms[id].title.as_str() {
                                                     "" => format!("[{}]", id),
                                                     title => format!("[{}] {}", id, title),
                                                 };
-                                                match alarms[id].is_strict {
+                                                build_plain_message(match alarms[id].is_strict {
                                                     true => format!(
                                                         "已变更闹钟 {} 为严格模式。",
                                                         alarm_text
@@ -334,13 +344,13 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                                         "已取消闹钟 {} 的严格模式。",
                                                         alarm_text
                                                     ),
-                                                }
+                                                })
                                             }
                                         }
                                     }
                                 };
                                 store.save().expect("Failed to save state");
-                                reply_text_msg(build_plain_message(to_send));
+                                reply_text_msg(to_send);
                             }
                             "#next" => {
                                 let state = store.state();

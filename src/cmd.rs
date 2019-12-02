@@ -24,8 +24,8 @@ pub fn parse_command_msg(input: &str) -> Command {
     let first_space = input.find(char::is_whitespace);
     match first_space {
         Some(first_space) => Command {
-            cmd: &input[..first_space],
-            arg: &input[(first_space + 1)..],
+            cmd: &input[..first_space].trim(),
+            arg: &input[(first_space + 1)..].trim(),
         },
         None => Command {
             cmd: input,
