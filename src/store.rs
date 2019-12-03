@@ -56,6 +56,7 @@ pub struct State {
   pub alarms: HashMap<i64, RefCell<Vec<Alarm>>>,
   pub timezone: HashMap<i64, String>,
   pub sleeping: HashMap<i64, RefCell<Vec<i64>>>,
+  pub users: HashMap<i64, String>,
 }
 
 impl State {
@@ -63,6 +64,7 @@ impl State {
     State {
       alarms: HashMap::new(),
       timezone: HashMap::new(),
+      users: HashMap::new(),
       sleeping: HashMap::new(),
     }
   }

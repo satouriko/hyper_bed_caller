@@ -104,6 +104,15 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           user_name = user.username().to_string();
         }
       }
+      "updateUser" => {
+        let update_user: UpdateUser = serde_json::from_str(json.as_str()).unwrap_or_default();
+        let user = update_user.user();
+        {
+          let mut state = store.state();
+          state.users.insert(user.id(), user.first_name().clone());
+        }
+        store.save().expect("Failed to save state");
+      }
       "updateNewMessage" => {
         let update_new_message: UpdateNewMessage =
           serde_json::from_str(json.as_str()).unwrap_or_default();
@@ -275,10 +284,17 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 };
                 let user_alarms = state.alarms.get(&message.sender_user_id());
                 let to_send = match user_alarms {
-                  None => build_plain_message("还一个闹钟都没有呢。"),
+                  None => {
+                    build_fmt_message(|f| f_bad_arguments(f, "还没有设置过闹钟呢，去设置一些吧。"))
+                  }
                   Some(alarms) => build_fmt_message(|f| match tz {
-                    Some(tz) => f_list_alarms(f, &alarms.borrow(), tz),
-                    None => f_list_alarms(f, &alarms.borrow(), chrono::Local.clone()),
+                    Some(tz) => f_list_alarms(f, &alarms.borrow(), tz, message.chat_id()),
+                    None => f_list_alarms(
+                      f,
+                      &alarms.borrow(),
+                      chrono::Local.clone(),
+                      message.chat_id(),
+                    ),
                   }),
                 };
                 reply_text_msg(to_send);
@@ -291,7 +307,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     let user_alarms = state.alarms.get(&message.sender_user_id());
                     match user_alarms {
                       None => build_fmt_message(|f| {
-                        f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
+                        f_bad_arguments(f, "还没有设置过闹钟呢，去设置一些吧。")
                       }),
                       Some(alarms) => {
                         let mut alarms = alarms.borrow_mut();
@@ -302,6 +318,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                            a: Option<&mut Alarm>|
                            -> InputMessageContent {
                             if let None = a {
+                              if message.chat_id() < 0 {
+                                return build_plain_message("没有要响的闹钟了，回私聊试试看？");
+                              }
                               return build_fmt_message(|f| {
                                 f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
                               });
@@ -333,6 +352,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               } else {
                                 format!("已取消预定于 {} 的闹钟 {}。", s, a.title)
                               });
+                            }
+                            if message.chat_id() < 0 {
+                              return build_plain_message("最近没有要响的闹钟了，回私聊试试看？");
                             }
                             return build_fmt_message(|f| {
                               f_bad_arguments(f, "最近没有要响的闹钟。")
@@ -452,11 +474,13 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 let tz = state.timezone.get(&message.sender_user_id());
                 let (time_str, alarm_title) = match tz {
                   Some(tz) => {
-                    let next_alarm = get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap());
+                    let next_alarm =
+                      get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap(), message.chat_id());
                     (next_alarm.schedule().to_string(), next_alarm.alarm_title())
                   }
                   None => {
-                    let next_alarm = get_recent_schedule(&alarms, chrono::Local.clone());
+                    let next_alarm =
+                      get_recent_schedule(&alarms, chrono::Local.clone(), message.chat_id());
                     (next_alarm.schedule().to_string(), next_alarm.alarm_title())
                   }
                 };
@@ -580,6 +604,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           CallState::Discarded(_) => {
             let now = chrono::Local::now().timestamp();
             let state = store.state();
+            let user_name = state.users.get(&user_id);
+            let user_name = match user_name {
+              None => "他",
+              Some(name) => name,
+            };
             let user_alarms = state.alarms.get(&user_id);
             if let None = user_alarms {
               continue;
@@ -590,6 +619,19 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               if alarm.is_pending {
                 alarm.is_pending = false;
                 println!("[{}] Will alarm {} again due to declining call", now, alarm);
+                if alarm.chat_id < 0 {
+                  let req = SendMessage::builder()
+                    .chat_id(alarm.chat_id)
+                    .input_message_content(build_fmt_message(|f| {
+                      f_help_alarm(f, user_name, user_id)
+                    }))
+                    .build();
+                  tdlib.send(&req.to_json().expect("Bad JSON"));
+                  println!(
+                    "[{}] Sent help message for alarm {} due to chat_id < 0",
+                    now, alarm
+                  );
+                }
               }
             }
           }

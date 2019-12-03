@@ -107,13 +107,16 @@ where
   }
 }
 
-pub fn get_recent_schedule<Z>(alarms: &Vec<Alarm>, timezone: Z) -> AlarmSchedule<Z>
+pub fn get_recent_schedule<Z>(alarms: &Vec<Alarm>, timezone: Z, chat_id: i64) -> AlarmSchedule<Z>
 where
   Z: TimeZone + 'static,
 {
   let next_timestamp = 0;
   let mut recent = AlarmSchedule::default();
   for alarm in alarms.iter() {
+    if chat_id < 0 && alarm.chat_id != chat_id {
+      continue;
+    }
     let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {

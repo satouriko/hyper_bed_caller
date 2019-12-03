@@ -67,14 +67,21 @@ where
   f.entities(entities);
 }
 
-pub fn f_list_alarms<'a, Z>(f: &'a mut RTDFormattedTextBuilder, alarms: &Vec<Alarm>, tz: Z)
-where
+pub fn f_list_alarms<'a, Z>(
+  f: &'a mut RTDFormattedTextBuilder,
+  alarms: &Vec<Alarm>,
+  tz: Z,
+  chat_id: i64,
+) where
   Z: TimeZone + 'static,
 {
   let mut text = String::default();
   let mut entities: Vec<TextEntity> = vec![];
   let mut have_expired = false;
   for (i, alarm) in alarms.iter().enumerate() {
+    if chat_id < 0 && alarm.chat_id != chat_id {
+      continue;
+    }
     let num = format!("[{}]", i);
     let bold = TextEntityTypeBold::builder().build();
     let bold_entity = TextEntity::builder()
@@ -115,6 +122,12 @@ where
   }
   if have_expired {
     text += "\nTip：使用命令 #purge 清除所有已过期的闹钟。"
+  }
+  if text == "" {
+    text += "还一个闹钟都没有呢。";
+    if alarms.len() > 0 {
+      text += "回私聊中试试吧。"
+    }
   }
   f.text(text);
   f.entities(entities);
@@ -164,6 +177,27 @@ where
     .build();
   text += challenge.as_ref();
   entities.push(code_entity);
+  f.text(text);
+  f.entities(entities);
+}
+
+pub fn f_help_alarm<T>(f: &mut RTDFormattedTextBuilder, name: T, user_id: i64)
+where
+  T: AsRef<str>,
+{
+  let name = name.as_ref();
+  let href = format!("tg://user?id={}", user_id);
+  let mut text = format!("群友们，我叫不到");
+  let mut entities: Vec<TextEntity> = vec![];
+  let url = TextEntityTypeTextUrl::builder().url(href).build();
+  let url_entity = TextEntity::builder()
+    .type_(TextEntityType::TextUrl(url))
+    .offset(text.encode_utf16().count().try_into().unwrap())
+    .length(name.encode_utf16().count().try_into().unwrap())
+    .build();
+  entities.push(url_entity);
+  text += name;
+  text += "了，帮我叫一下！";
   f.text(text);
   f.entities(entities);
 }
