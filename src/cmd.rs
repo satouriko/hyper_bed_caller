@@ -1,6 +1,9 @@
 extern crate cron;
+use crate::fmt::*;
+use crate::store::{Alarm, Store};
 use chrono::{self, prelude::*};
 use cron::Schedule;
+use rtdlib::types::InputMessageContent;
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -154,4 +157,32 @@ where
     cron: cron_str,
     title,
   })
+}
+
+pub fn with_alarm_id<T>(store: &Store, user_id: i64, cmd: &Command, f: T) -> InputMessageContent
+where
+  T: Fn(&mut Vec<Alarm>, usize) -> InputMessageContent,
+{
+  let id = cmd.arg().parse::<usize>();
+  if let Err(_) = id {
+    return build_fmt_message(|f| f_bad_arguments(f, "闹钟编号格式有误。"));
+  }
+  let id = id.unwrap();
+  let to_send = {
+    let state = store.state();
+    let user_alarms = state.alarms.get(&user_id);
+    match user_alarms {
+      None => build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。")),
+      Some(alarms) => {
+        let mut alarms = alarms.borrow_mut();
+        if id >= alarms.len() {
+          build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。"))
+        } else {
+          f(&mut alarms, id)
+        }
+      }
+    }
+  };
+  store.save().expect("Failed to save state");
+  return to_send;
 }

@@ -321,21 +321,18 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                             if a.is_informing {
                               a.is_informing = false;
                               return if a.title == "" {
-                                build_plain_message(format!("已关闭正在进行的闹钟。"))
+                                build_plain_message("已关闭正在进行的闹钟。")
                               } else {
                                 build_plain_message(format!("已关闭正在进行的闹钟 {}。", a.title))
                               };
                             }
                             if t >= now && t < now + 3600 {
                               a.is_onceoff = true;
-                              return if a.title == "" {
-                                build_plain_message(format!("已取消预定于 {} 的闹钟。", s))
+                              return build_plain_message(if a.title == "" {
+                                format!("已取消预定于 {} 的闹钟。", s)
                               } else {
-                                build_plain_message(format!(
-                                  "已取消预定于 {} 的闹钟 {}。",
-                                  s, a.title
-                                ))
-                              };
+                                format!("已取消预定于 {} 的闹钟 {}。", s, a.title)
+                              });
                             }
                             return build_fmt_message(|f| {
                               f_bad_arguments(f, "最近没有要响的闹钟。")
@@ -368,75 +365,82 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   reply_text_msg(to_send);
                   continue;
                 }
-                let id = cmd.arg().parse::<usize>();
-                if let Err(_) = id {
-                  reply_text_msg(build_fmt_message(|f| {
-                    f_bad_arguments(f, "闹钟编号格式有误。")
-                  }));
-                  continue;
-                }
-                let id = id.unwrap();
-                let to_send = {
-                  let state = store.state();
-                  let user_alarms = state.alarms.get(&message.sender_user_id());
-                  match user_alarms {
-                    None => build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。")),
-                    Some(alarms) => {
-                      let mut alarms = alarms.borrow_mut();
-                      if id >= alarms.len() {
-                        build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。"))
+                reply_text_msg(with_alarm_id(
+                  &store,
+                  message.sender_user_id(),
+                  &cmd,
+                  |alarms, id| {
+                    if alarms[id].is_strict && alarms[id].is_informing {
+                      build_plain_message("你不能移除正在进行的闹钟，请先关闭闹钟。")
+                    } else {
+                      alarms.remove(id);
+                      build_plain_message("闹钟已移除。")
+                    }
+                  },
+                ));
+              }
+              "#disable" => {
+                reply_text_msg(with_alarm_id(
+                  &store,
+                  message.sender_user_id(),
+                  &cmd,
+                  |alarms, id| {
+                    if alarms[id].is_strict && alarms[id].is_informing {
+                      build_plain_message("你不能禁用正在进行的闹钟，请先关闭闹钟。")
+                    } else if alarms[id].is_disabled {
+                      build_plain_message("闹钟已经是禁用状态。")
+                    } else {
+                      alarms[id].is_informing = false;
+                      alarms[id].is_disabled = true;
+                      if alarms[id].title == "" {
+                        build_plain_message("闹钟已禁用。")
                       } else {
-                        if alarms[id].is_strict && alarms[id].is_informing {
-                          build_plain_message("你不能移除正在进行的闹钟，请先关闭闹钟。")
-                        } else {
-                          alarms.remove(id);
-                          build_plain_message("闹钟已移除。")
-                        }
+                        build_plain_message(format!("已禁用闹钟 {}。", alarms[id].title))
                       }
                     }
-                  }
-                };
-                store.save().expect("Failed to save state");
-                reply_text_msg(to_send);
+                  },
+                ));
+              }
+              "#enable" => {
+                reply_text_msg(with_alarm_id(
+                  &store,
+                  message.sender_user_id(),
+                  &cmd,
+                  |alarms, id| {
+                    if !alarms[id].is_disabled {
+                      build_plain_message("闹钟已经是启用状态。")
+                    } else {
+                      alarms[id].is_disabled = false;
+                      if alarms[id].title == "" {
+                        build_plain_message("闹钟已启用。")
+                      } else {
+                        build_plain_message(format!("已启用闹钟 {}。", alarms[id].title))
+                      }
+                    }
+                  },
+                ));
               }
               "#strict" => {
-                let id = cmd.arg().parse::<usize>();
-                if let Err(_) = id {
-                  reply_text_msg(build_fmt_message(|f| {
-                    f_bad_arguments(f, "闹钟编号格式有误。")
-                  }));
-                  continue;
-                }
-                let id = id.unwrap();
-                let to_send = {
-                  let state = store.state();
-                  let user_alarms = state.alarms.get(&message.sender_user_id());
-                  match user_alarms {
-                    None => build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。")),
-                    Some(alarms) => {
-                      let mut alarms = alarms.borrow_mut();
-                      if id >= alarms.len() {
-                        build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。"))
-                      } else {
-                        if alarms[id].is_informing {
-                          build_plain_message("你不能对正在进行的闹钟使用此命令。")
-                        } else {
-                          alarms[id].is_strict = !alarms[id].is_strict;
-                          let alarm_text = match alarms[id].title.as_str() {
-                            "" => format!("[{}]", id),
-                            title => format!("[{}] {}", id, title),
-                          };
-                          build_plain_message(match alarms[id].is_strict {
-                            true => format!("已变更闹钟 {} 为严格模式。", alarm_text),
-                            false => format!("已取消闹钟 {} 的严格模式。", alarm_text),
-                          })
-                        }
-                      }
+                reply_text_msg(with_alarm_id(
+                  &store,
+                  message.sender_user_id(),
+                  &cmd,
+                  |alarms, id| {
+                    if alarms[id].is_informing {
+                      build_plain_message("你不能对正在进行的闹钟使用此命令。")
+                    } else {
+                      alarms[id].is_strict = !alarms[id].is_strict;
+                      let alarm_text = match alarms[id].title.as_str() {
+                        "" => format!("[{}]", id),
+                        title => format!("[{}] {}", id, title),
+                      };
+                      build_plain_message(match alarms[id].is_strict {
+                        true => format!("已变更闹钟 {} 为严格模式。", alarm_text),
+                        false => format!("已取消闹钟 {} 的严格模式。", alarm_text),
+                      })
                     }
-                  }
-                };
-                store.save().expect("Failed to save state");
-                reply_text_msg(to_send);
+                  },
+                ));
               }
               "#next" => {
                 let state = store.state();
