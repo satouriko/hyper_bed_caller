@@ -84,10 +84,14 @@ where
       .build();
     text += &format!("{}  ", num);
     entities.push(bold_entity);
-    let next_alarm = get_next_schedule(&alarm.cron, tz.clone());
-    if !next_alarm.has_schedule() {
-      text += "#已过期  ";
-      have_expired = true;
+    if alarm.is_informing {
+      text += "#进行中  ";
+    } else {
+      let next_alarm = get_next_schedule(&alarm.cron, tz.clone());
+      if !next_alarm.has_schedule() {
+        text += "#已过期  ";
+        have_expired = true;
+      }
     }
     if alarm.title != "" {
       text += &format!("{}  ", alarm.title);

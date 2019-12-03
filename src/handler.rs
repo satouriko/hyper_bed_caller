@@ -1,6 +1,6 @@
 use std::{cell::RefCell, env, io, sync::Arc, thread, time};
 extern crate uname;
-use crate::{alarm::*, cmd::*, fmt::*, store::*};
+use crate::{alarm::*, cmd::*, cron::*, fmt::*, store::*};
 use chrono;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
@@ -251,6 +251,77 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 reply_text_msg(to_send);
               }
               "#disalarm" => {
+                if cmd.arg() == "" {
+                  let to_send = {
+                    let now = chrono::Local::now().timestamp();
+                    let state = store.state();
+                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                    match user_alarms {
+                      None => build_fmt_message(|f| {
+                        f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
+                      }),
+                      Some(alarms) => {
+                        let mut alarms = alarms.borrow_mut();
+                        let tz = state.timezone.get(&message.sender_user_id());
+                        let disalarm_if_in_an_hour =
+                          |t: i64, a: Option<&mut Alarm>| -> InputMessageContent {
+                            if let None = a {
+                              return build_fmt_message(|f| {
+                                f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
+                              });
+                            }
+                            let a = a.unwrap();
+                            if a.is_pending {
+                              return build_plain_message(
+                                "你不能移除正在响铃的闹钟，请先关闭闹钟。",
+                              );
+                            }
+                            if a.is_informing && a.is_strict {
+                              return build_plain_message(
+                                "你不能移除正在进行的闹钟，请先关闭闹钟。",
+                              );
+                            }
+                            if a.is_informing {
+                              a.is_informing = false;
+                              return build_plain_message(
+                                "你不能移除正在进行的闹钟，请先关闭闹钟。",
+                              );
+                            }
+                            if t >= now && t < now + 3600 {
+                              a.is_oneoff = true;
+                              return build_plain_message(
+                                "你不能移除正在进行的闹钟，请先关闭闹钟。",
+                              );
+                            }
+                            return build_fmt_message(|f| {
+                              f_bad_arguments(f, "最近没有要响的闹钟。")
+                            });
+                          };
+                        match tz {
+                          Some(tz) => {
+                            let mut next_alarm =
+                              get_recent_schedule_mut(&mut *alarms, tz.parse::<Tz>().unwrap());
+                            disalarm_if_in_an_hour(
+                              next_alarm.schedule().to_timestamp(),
+                              next_alarm.alarm_mut(),
+                            )
+                          }
+                          None => {
+                            let mut next_alarm =
+                              get_recent_schedule_mut(&mut *alarms, chrono::Local.clone());
+                            disalarm_if_in_an_hour(
+                              next_alarm.schedule().to_timestamp(),
+                              next_alarm.alarm_mut(),
+                            )
+                          }
+                        }
+                      }
+                    }
+                  };
+                  store.save().expect("Failed to save state");
+                  reply_text_msg(to_send);
+                  continue;
+                }
                 let id = cmd.arg().parse::<usize>();
                 if let Err(_) = id {
                   reply_text_msg(build_fmt_message(|f| {
@@ -269,8 +340,12 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                       if id >= alarms.len() {
                         build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。"))
                       } else {
-                        alarms.remove(id);
-                        build_plain_message("闹钟已移除。")
+                        if alarms[id].is_strict && alarms[id].is_informing {
+                          build_plain_message("你不能移除正在进行的闹钟，请先关闭闹钟。")
+                        } else {
+                          alarms.remove(id);
+                          build_plain_message("闹钟已移除。")
+                        }
                       }
                     }
                   }
@@ -297,15 +372,19 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                       if id >= alarms.len() {
                         build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。"))
                       } else {
-                        alarms[id].is_strict = !alarms[id].is_strict;
-                        let alarm_text = match alarms[id].title.as_str() {
-                          "" => format!("[{}]", id),
-                          title => format!("[{}] {}", id, title),
-                        };
-                        build_plain_message(match alarms[id].is_strict {
-                          true => format!("已变更闹钟 {} 为严格模式。", alarm_text),
-                          false => format!("已取消闹钟 {} 的严格模式。", alarm_text),
-                        })
+                        if alarms[id].is_informing {
+                          build_plain_message("你不能对正在进行的闹钟使用此命令。")
+                        } else {
+                          alarms[id].is_strict = !alarms[id].is_strict;
+                          let alarm_text = match alarms[id].title.as_str() {
+                            "" => format!("[{}]", id),
+                            title => format!("[{}] {}", id, title),
+                          };
+                          build_plain_message(match alarms[id].is_strict {
+                            true => format!("已变更闹钟 {} 为严格模式。", alarm_text),
+                            false => format!("已取消闹钟 {} 的严格模式。", alarm_text),
+                          })
+                        }
                       }
                     }
                   }
@@ -321,7 +400,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 }
                 let alarms = user_alarms.unwrap().borrow();
                 let tz = state.timezone.get(&message.sender_user_id());
-                let (tz_str, alarm_title) = match tz {
+                let (time_str, alarm_title) = match tz {
                   Some(tz) => {
                     let next_alarm = get_recent_schedule(&alarms, tz.parse::<Tz>().unwrap());
                     (next_alarm.schedule().to_string(), next_alarm.alarm_title())
@@ -331,8 +410,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     (next_alarm.schedule().to_string(), next_alarm.alarm_title())
                   }
                 };
-                let to_send = match tz_str {
-                  Some(tz_str) => format!("下次闹钟时间：{} {}", tz_str, alarm_title),
+                let to_send = match time_str {
+                  Some(time_str) => format!("下次闹钟时间：{} {}", time_str, alarm_title),
                   None => format!("没有要响的闹钟了。"),
                 };
                 reply_text_msg(build_plain_message(to_send));
@@ -358,6 +437,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   let mut i = 0;
                   let mut purged_cnt = 0;
                   while i != alarms.len() {
+                    if alarms[i].is_informing {
+                      i += 1;
+                      continue;
+                    }
                     match tz {
                       Some(tz) => {
                         let next_alarm = get_next_schedule(&alarms[i].cron, tz);
@@ -399,7 +482,63 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           _ => (),
         }
       }
-      "updateCall" => {}
+      "updateCall" => {
+        let update_call: UpdateCall = serde_json::from_str(json.as_str()).unwrap_or_default();
+        let call = update_call.call();
+        let user_id = call.user_id();
+        if !call.is_outgoing() {
+          if let CallState::Pending(_) = call.state() {
+            let req = DiscardCall::builder().call_id(call.id()).build();
+            tdlib.send(&req.to_json().expect("Bad JSON"));
+          }
+          continue;
+        }
+        match call.state() {
+          CallState::ExchangingKeys(_) => {
+            let state = store.state();
+            let user_alarms = state.alarms.get(&user_id);
+            if let None = user_alarms {
+              continue;
+            }
+            let user_alarms = user_alarms.unwrap();
+            let mut alarms = user_alarms.borrow_mut();
+            for alarm in alarms.iter_mut() {
+              if alarm.is_pending {
+                alarm.is_pending = false;
+                if !alarm.is_strict {
+                  alarm.is_informing = false;
+                } else {
+                  let (challenge, answer, map) = generate_strict_challenge();
+                  alarm.strict_challenge = answer;
+                  let req = SendMessage::builder()
+                    .chat_id(user_id)
+                    .input_message_content(build_fmt_message(|f| {
+                      f_strict_challenge(f, &challenge, &map)
+                    }))
+                    .build();
+                  tdlib.send(&req.to_json().expect("Bad JSON"));
+                }
+              }
+            }
+          }
+          CallState::Discarded(_) => {
+            let state = store.state();
+            let user_alarms = state.alarms.get(&user_id);
+            if let None = user_alarms {
+              continue;
+            }
+            let user_alarms = user_alarms.unwrap();
+            let mut alarms = user_alarms.borrow_mut();
+            for alarm in alarms.iter_mut() {
+              if alarm.is_pending {
+                alarm.is_pending = false;
+              }
+            }
+          }
+          _ => {}
+        }
+        store.save().expect("Failed to save state")
+      }
       _ => {
         println!("{}\t{}", td_type, json);
       }
@@ -408,8 +547,75 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
 }
 
 pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
-  thread::spawn(move || {
-    thread::sleep(time::Duration::from_secs(10));
-    println!("{:?} {:?}", tdlib, store.state());
+  let mut service = CronService::new();
+  thread::spawn(move || loop {
+    thread::sleep(time::Duration::from_secs(1));
+    service.tick(|lask_tick, now| {
+      {
+        let state = store.state();
+        let alarms_map = &state.alarms;
+        for (user_id, user_alarms) in alarms_map {
+          let tz = state.timezone.get(user_id);
+          let tz = match tz {
+            Some(tz) => {
+              let tz = tz.parse::<Tz>().unwrap();
+              Some(tz)
+            }
+            None => None,
+          };
+          let mut alarms = user_alarms.borrow_mut();
+          for alarm in alarms.iter_mut() {
+            let should_alarm = match tz {
+              Some(tz) => {
+                let next_alarm = match alarm.is_informing {
+                  false => get_next_schedule(&alarm.cron, tz).to_timestamp(),
+                  true => alarm.reschedule,
+                };
+                next_alarm > lask_tick && next_alarm <= now
+              }
+              None => {
+                let next_alarm = match alarm.is_informing {
+                  false => get_next_schedule(&alarm.cron, chrono::Local.clone()).to_timestamp(),
+                  true => alarm.reschedule,
+                };
+                next_alarm > lask_tick && next_alarm <= now
+              }
+            };
+            if should_alarm {
+              if alarm.is_pending {
+                continue;
+              }
+              // is_oneoff * is_informing = 0
+              if alarm.is_oneoff {
+                alarm.is_oneoff = false;
+                continue;
+              }
+              alarm.is_pending = true;
+              alarm.is_informing = true;
+              alarm.reschedule = now + 300;
+              if alarm.title != "" {
+                let req = SendMessage::builder()
+                  .chat_id(*user_id)
+                  .input_message_content(build_plain_message(&alarm.title))
+                  .build();
+                tdlib.send(&req.to_json().expect("Bad JSON"));
+              }
+              let req = CreateCall::builder()
+                .user_id(*user_id)
+                .protocol(
+                  CallProtocol::builder()
+                    .udp_p2p(true)
+                    .udp_reflector(true)
+                    .min_layer(65)
+                    .max_layer(65),
+                )
+                .build();
+              tdlib.send(&req.to_json().expect("Bad JSON"));
+            }
+          }
+        }
+      }
+      store.save().expect("Failed to save state");
+    });
   })
 }

@@ -16,7 +16,7 @@ pub struct Alarm {
   pub is_pending: bool,
   pub is_informing: bool,
   pub strict_challenge: String,
-  pub reschedule: String,
+  pub reschedule: i64,
 }
 
 impl Alarm {
@@ -34,7 +34,7 @@ impl Alarm {
       is_pending: false,
       is_informing: false,
       strict_challenge: String::default(),
-      reschedule: String::default(),
+      reschedule: 0,
     }
   }
 }
@@ -43,6 +43,7 @@ impl Alarm {
 pub struct State {
   pub alarms: HashMap<i64, RefCell<Vec<Alarm>>>,
   pub timezone: HashMap<i64, String>,
+  pub sleeping: HashMap<i64, RefCell<Vec<i64>>>,
 }
 
 impl State {
@@ -50,6 +51,7 @@ impl State {
     State {
       alarms: HashMap::new(),
       timezone: HashMap::new(),
+      sleeping: HashMap::new(),
     }
   }
 }

@@ -9,6 +9,90 @@ pub struct AlarmSchedule<'a, Z: TimeZone> {
   inner: Option<(DateTime<Z>, &'a Alarm)>,
 }
 
+#[derive(Debug)]
+pub struct AlarmScheduleMut<'a, Z: TimeZone> {
+  inner: Option<(DateTime<Z>, &'a mut Alarm)>,
+}
+
+type AlarmScheduleMutRef<'a, Z> = Option<(&'a DateTime<Z>, &'a Alarm)>;
+
+pub trait AsAlarmScheduleRef<Z>
+where
+  Z: TimeZone + 'static,
+{
+  fn as_ref(&self) -> AlarmScheduleMutRef<Z>;
+  fn schedule(&self) -> ScheduleRef<'_, Z> {
+    match self.as_ref() {
+      None => ScheduleRef::default(),
+      Some(alarm_schedule) => ScheduleRef::new(&alarm_schedule.0),
+    }
+  }
+  fn alarm(&self) -> Option<&Alarm> {
+    match self.as_ref() {
+      None => None,
+      Some(alarm_schedule) => Some(&alarm_schedule.1),
+    }
+  }
+  fn alarm_title(&self) -> String {
+    match self.as_ref() {
+      None => String::default(),
+      Some(alarm_schedule) => alarm_schedule.1.title.clone(),
+    }
+  }
+}
+
+impl<Z> AsAlarmScheduleRef<Z> for AlarmScheduleMut<'_, Z>
+where
+  Z: TimeZone + 'static,
+{
+  fn as_ref(&self) -> AlarmScheduleMutRef<Z> {
+    match &self.inner {
+      None => None,
+      Some(alarm_schedule) => Some((&alarm_schedule.0, alarm_schedule.1)),
+    }
+  }
+}
+
+impl<'a, Z> AlarmScheduleMut<'a, Z>
+where
+  Z: TimeZone,
+{
+  pub fn as_immut(self) -> AlarmSchedule<'a, Z> {
+    AlarmSchedule {
+      inner: match self.inner {
+        None => None,
+        Some(alarm_schedule) => Some((alarm_schedule.0, alarm_schedule.1)),
+      },
+    }
+  }
+  pub fn alarm_mut(&mut self) -> Option<&mut Alarm> {
+    match &mut self.inner {
+      None => None,
+      Some(alarm_schedule) => Some(&mut alarm_schedule.1),
+    }
+  }
+  pub fn default() -> AlarmScheduleMut<'static, Z> {
+    AlarmScheduleMut { inner: None }
+  }
+  pub fn new(schedule: DateTime<Z>, alarm: &mut Alarm) -> AlarmScheduleMut<Z> {
+    AlarmScheduleMut {
+      inner: Some((schedule, alarm)),
+    }
+  }
+}
+
+impl<Z> AsAlarmScheduleRef<Z> for AlarmSchedule<'_, Z>
+where
+  Z: TimeZone + 'static,
+{
+  fn as_ref(&self) -> AlarmScheduleMutRef<Z> {
+    match &self.inner {
+      None => None,
+      Some(alarm_schedule) => Some((&alarm_schedule.0, alarm_schedule.1)),
+    }
+  }
+}
+
 impl<Z> AlarmSchedule<'_, Z>
 where
   Z: TimeZone + 'static,
@@ -19,18 +103,6 @@ where
   pub fn new(schedule: DateTime<Z>, alarm: &Alarm) -> AlarmSchedule<Z> {
     AlarmSchedule {
       inner: Some((schedule, alarm)),
-    }
-  }
-  pub fn schedule(&self) -> ScheduleRef<'_, Z> {
-    match &self.inner {
-      None => ScheduleRef::default(),
-      Some(alarm_schedule) => ScheduleRef::new(&alarm_schedule.0),
-    }
-  }
-  pub fn alarm_title(&self) -> String {
-    match &self.inner {
-      None => String::default(),
-      Some(alarm_schedule) => alarm_schedule.1.title.clone(),
     }
   }
 }
@@ -45,7 +117,23 @@ where
     let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
-      recent = AlarmSchedule::new(next_alarm.inner.unwrap(), &alarm);
+      recent = AlarmSchedule::new(next_alarm.inner.unwrap(), alarm);
+    }
+  }
+  return recent;
+}
+
+pub fn get_recent_schedule_mut<Z>(alarms: &mut Vec<Alarm>, timezone: Z) -> AlarmScheduleMut<Z>
+where
+  Z: TimeZone + 'static,
+{
+  let next_timestamp = 0;
+  let mut recent = AlarmScheduleMut::default();
+  for alarm in alarms.iter_mut() {
+    let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
+    let t = next_alarm.to_timestamp();
+    if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
+      recent = AlarmScheduleMut::new(next_alarm.inner.unwrap(), alarm);
     }
   }
   return recent;
