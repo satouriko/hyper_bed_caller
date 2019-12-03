@@ -53,19 +53,19 @@ impl Display for Alarm {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
-  pub alarms: HashMap<i64, RefCell<Vec<Alarm>>>,
-  pub timezone: HashMap<i64, String>,
-  pub sleeping: HashMap<i64, RefCell<Vec<i64>>>,
-  pub users: HashMap<i64, String>,
+  pub alarms: RefCell<HashMap<i64, RefCell<Vec<Alarm>>>>,
+  pub timezone: RefCell<HashMap<i64, String>>,
+  pub sleeping: RefCell<HashMap<i64, RefCell<Vec<i64>>>>,
+  pub users: RefCell<HashMap<i64, String>>,
 }
 
 impl State {
   pub fn new() -> State {
     State {
-      alarms: HashMap::new(),
-      timezone: HashMap::new(),
-      users: HashMap::new(),
-      sleeping: HashMap::new(),
+      alarms: RefCell::new(HashMap::new()),
+      timezone: RefCell::new(HashMap::new()),
+      users: RefCell::new(HashMap::new()),
+      sleeping: RefCell::new(HashMap::new()),
     }
   }
 }

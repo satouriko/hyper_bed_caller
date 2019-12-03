@@ -1,4 +1,5 @@
-use std::{cell::RefCell, env, io, sync::Arc, thread, time};
+use std::{cell::RefCell, collections::HashMap};
+use std::{env, io, sync::Arc, thread, time};
 extern crate uname;
 use crate::{alarm::*, cmd::*, cron::*, fmt::*, store::*};
 use chrono;
@@ -40,6 +41,24 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
     if let None = td_type {
       eprintln!("data failed with json");
       continue;
+    };
+    let unlock_user = |user_id: i64, sleeping_map: &mut HashMap<i64, RefCell<Vec<i64>>>| {
+      let user_sleeping = sleeping_map.get(&user_id);
+      if let None = user_sleeping {
+        return;
+      }
+      let user_sleeping = sleeping_map.get(&user_id).unwrap();
+      for chat_id in user_sleeping.borrow().iter() {
+        let req = SetChatMemberStatus::builder()
+          .chat_id(*chat_id)
+          .user_id(user_id)
+          .status(ChatMemberStatus::Member(
+            ChatMemberStatusMember::builder().build(),
+          ))
+          .build();
+        tdlib.send(&req.to_json().expect("Bad JSON"));
+      }
+      sleeping_map.insert(user_id, RefCell::new(vec![]));
     };
     let td_type = td_type.unwrap();
     match td_type.as_str() {
@@ -108,8 +127,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         let update_user: UpdateUser = serde_json::from_str(json.as_str()).unwrap_or_default();
         let user = update_user.user();
         {
-          let mut state = store.state();
-          state.users.insert(user.id(), user.first_name().clone());
+          let state = store.state();
+          let mut users_map = state.users.borrow_mut();
+          users_map.insert(user.id(), user.first_name().clone());
         }
         store.save().expect("Failed to save state");
       }
@@ -140,7 +160,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               let now = chrono::Local::now().timestamp();
               {
                 let state = store.state();
-                let user_alarms = state.alarms.get(&message.sender_user_id());
+                let alarms_map = state.alarms.borrow();
+                let mut sleeping_map = state.sleeping.borrow_mut();
+                let user_alarms = alarms_map.get(&message.sender_user_id());
                 if let None = user_alarms {
                   continue;
                 }
@@ -156,6 +178,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                       } else {
                         build_plain_message(format!("闹钟 {} 已关闭。", alarm.title))
                       });
+                      unlock_user(message.sender_user_id(), &mut sleeping_map);
                       println!(
                         "[{}] Fulfilled alarm {} due to completing challenge",
                         now, alarm
@@ -170,12 +193,15 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
               continue;
             }
+
             let text = message_text.text().text();
             let cmd = parse_command_msg(text);
+
             let handle_alarm = |is_strict: bool| {
               let tz = {
                 let state = store.state();
-                let tz = state.timezone.get(&message.sender_user_id());
+                let timezone_map = state.timezone.borrow();
+                let tz = timezone_map.get(&message.sender_user_id());
                 match tz {
                   Some(tz) => {
                     let tz = tz.parse::<Tz>().unwrap();
@@ -200,15 +226,13 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     cron_args.title(),
                     is_strict,
                   );
-                  let mut state = store.state();
-                  let user_alarms = state.alarms.get(&message.sender_user_id());
+                  let state = store.state();
+                  let mut alarms_map = state.alarms.borrow_mut();
+                  let user_alarms = alarms_map.get(&message.sender_user_id());
                   if let None = user_alarms {
-                    state
-                      .alarms
-                      .insert(message.sender_user_id(), RefCell::new(vec![]));
+                    alarms_map.insert(message.sender_user_id(), RefCell::new(vec![]));
                   }
-                  let mut user_alarms = state
-                    .alarms
+                  let mut user_alarms = alarms_map
                     .get(&message.sender_user_id())
                     .unwrap()
                     .borrow_mut();
@@ -244,7 +268,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               "#timezone" => {
                 if cmd.arg() == "" {
                   let state = store.state();
-                  let tz = state.timezone.get(&message.sender_user_id());
+                  let timezone_map = state.timezone.borrow();
+                  let tz = timezone_map.get(&message.sender_user_id());
                   let current_tz_str = match tz {
                     Some(tz) => tz.clone(),
                     None => chrono::Local::now().format("%Z").to_string(),
@@ -256,10 +281,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 let to_send = match tz {
                   Err(_) => build_fmt_message(|f| f_bad_arguments(f, "没有这个时区。")),
                   Ok(_) => {
-                    let mut state = store.state();
-                    state
-                      .timezone
-                      .insert(message.sender_user_id(), String::from(cmd.arg()));
+                    let state = store.state();
+                    let mut timezone_map = state.timezone.borrow_mut();
+                    timezone_map.insert(message.sender_user_id(), String::from(cmd.arg()));
                     build_plain_message(format!("时区已更新为 {}。", cmd.arg()))
                   }
                 };
@@ -274,7 +298,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
               "#list" => {
                 let state = store.state();
-                let tz = state.timezone.get(&message.sender_user_id());
+                let timezone_map = state.timezone.borrow();
+                let tz = timezone_map.get(&message.sender_user_id());
                 let tz = match tz {
                   Some(tz) => {
                     let tz = tz.parse::<Tz>().unwrap();
@@ -282,7 +307,8 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   }
                   None => None,
                 };
-                let user_alarms = state.alarms.get(&message.sender_user_id());
+                let alarms_map = state.alarms.borrow();
+                let user_alarms = alarms_map.get(&message.sender_user_id());
                 let to_send = match user_alarms {
                   None => {
                     build_fmt_message(|f| f_bad_arguments(f, "还没有设置过闹钟呢，去设置一些吧。"))
@@ -304,14 +330,16 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   let to_send = {
                     let now = chrono::Local::now().timestamp();
                     let state = store.state();
-                    let user_alarms = state.alarms.get(&message.sender_user_id());
+                    let alarms_map = state.alarms.borrow();
+                    let timezone_map = state.timezone.borrow();
+                    let user_alarms = alarms_map.get(&message.sender_user_id());
                     match user_alarms {
                       None => build_fmt_message(|f| {
                         f_bad_arguments(f, "还没有设置过闹钟呢，去设置一些吧。")
                       }),
                       Some(alarms) => {
                         let mut alarms = alarms.borrow_mut();
-                        let tz = state.timezone.get(&message.sender_user_id());
+                        let tz = timezone_map.get(&message.sender_user_id());
                         let disalarm_if_in_an_hour =
                           |t: i64,
                            s: Option<String>,
@@ -466,12 +494,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
               "#next" => {
                 let state = store.state();
-                let user_alarms = state.alarms.get(&message.sender_user_id());
+                let alarms_map = state.alarms.borrow();
+                let timezone_map = state.timezone.borrow();
+                let user_alarms = alarms_map.get(&message.sender_user_id());
                 if let None = user_alarms {
                   continue;
                 }
                 let alarms = user_alarms.unwrap().borrow();
-                let tz = state.timezone.get(&message.sender_user_id());
+                let tz = timezone_map.get(&message.sender_user_id());
                 let (time_str, alarm_title) = match tz {
                   Some(tz) => {
                     let next_alarm =
@@ -493,13 +523,15 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               "#purge" => {
                 let purged_cnt = {
                   let state = store.state();
-                  let user_alarms = state.alarms.get(&message.sender_user_id());
+                  let alarms_map = state.alarms.borrow();
+                  let timezone_map = state.timezone.borrow();
+                  let user_alarms = alarms_map.get(&message.sender_user_id());
                   if let None = user_alarms {
                     reply_text_msg(build_plain_message("还一个闹钟都没有呢。"));
                     continue;
                   }
                   let mut alarms = user_alarms.unwrap().borrow_mut();
-                  let tz = state.timezone.get(&message.sender_user_id());
+                  let tz = timezone_map.get(&message.sender_user_id());
                   let tz = match tz {
                     Some(tz) => {
                       let tz = tz.parse::<Tz>().unwrap();
@@ -548,6 +580,37 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   reply_text_msg(build_plain_message("没有过期的闹钟。"));
                 }
               }
+              "#sleep" => {
+                reply_text_msg(build_fmt_message(|f| {
+                  f_bad_arguments(f, "没有这个命令，使用 #sleep! ")
+                }));
+              }
+              "#sleep!" => {
+                {
+                  let state = store.state();
+                  let mut sleeping_map = state.sleeping.borrow_mut();
+                  let user_sleeping = sleeping_map.get(&message.sender_user_id());
+                  if let None = user_sleeping {
+                    sleeping_map.insert(message.sender_user_id(), RefCell::new(vec![]));
+                  }
+                  let user_sleeping = sleeping_map.get(&message.sender_user_id()).unwrap();
+                  user_sleeping.borrow_mut().push(message.chat_id());
+                }
+                store.save().expect("Failed to save state");
+                let req = SetChatMemberStatus::builder()
+                  .chat_id(message.chat_id())
+                  .user_id(message.sender_user_id())
+                  .status(ChatMemberStatus::Restricted(
+                    ChatMemberStatusRestricted::builder()
+                      .is_member(true)
+                      .restricted_until_date(1)
+                      .permissions(ChatPermissions::builder().can_send_messages(false).build())
+                      .build(),
+                  ))
+                  .build();
+                tdlib.send(&req.to_json().expect("Bad JSON"));
+                reply_text_msg(build_plain_message("See you next time!"));
+              }
               _ => {
                 continue;
               }
@@ -571,7 +634,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           CallState::ExchangingKeys(_) => {
             let now = chrono::Local::now().timestamp();
             let state = store.state();
-            let user_alarms = state.alarms.get(&user_id);
+            let alarms_map = state.alarms.borrow();
+            let mut sleeping_map = state.sleeping.borrow_mut();
+            let user_alarms = alarms_map.get(&user_id);
             if let None = user_alarms {
               continue;
             }
@@ -582,6 +647,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 alarm.is_pending = false;
                 if !alarm.is_strict {
                   alarm.is_informing = false;
+                  unlock_user(user_id, &mut sleeping_map);
                   println!("[{}] Fulfilled alarm {} due to answering call", now, alarm);
                 } else {
                   let (challenge, answer, map) = generate_strict_challenge();
@@ -604,12 +670,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           CallState::Discarded(_) => {
             let now = chrono::Local::now().timestamp();
             let state = store.state();
-            let user_name = state.users.get(&user_id);
+            let users_map = state.users.borrow();
+            let alarms_map = state.alarms.borrow();
+            let user_name = users_map.get(&user_id);
             let user_name = match user_name {
               None => "他",
               Some(name) => name,
             };
-            let user_alarms = state.alarms.get(&user_id);
+            let user_alarms = alarms_map.get(&user_id);
             if let None = user_alarms {
               continue;
             }
@@ -651,9 +719,10 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
     service.tick(|lask_tick, now| {
       {
         let state = store.state();
-        let alarms_map = &state.alarms;
-        for (user_id, user_alarms) in alarms_map {
-          let tz = state.timezone.get(user_id);
+        let alarms_map = state.alarms.borrow();
+        let timezone_map = state.timezone.borrow();
+        for (user_id, user_alarms) in &*alarms_map {
+          let tz = timezone_map.get(user_id);
           let tz = match tz {
             Some(tz) => {
               let tz = tz.parse::<Tz>().unwrap();

@@ -170,7 +170,8 @@ where
   let id = id.unwrap();
   let to_send = {
     let state = store.state();
-    let user_alarms = state.alarms.get(&user_id);
+    let alarms = state.alarms.borrow();
+    let user_alarms = alarms.get(&user_id);
     match user_alarms {
       None => build_fmt_message(|f| f_bad_arguments(f, "没有这个编号的闹钟。")),
       Some(alarms) => {
