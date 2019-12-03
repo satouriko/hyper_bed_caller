@@ -126,6 +126,33 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               continue;
             }
             if !text.starts_with("#") {
+              let mut toggled = false;
+              {
+                let state = store.state();
+                let user_alarms = state.alarms.get(&message.sender_user_id());
+                if let None = user_alarms {
+                  continue;
+                }
+                let user_alarms = user_alarms.unwrap();
+                let mut alarms = user_alarms.borrow_mut();
+                for alarm in alarms.iter_mut() {
+                  if alarm.is_strict && alarm.is_informing {
+                    if text == alarm.strict_challenge.as_str() {
+                      alarm.is_informing = false;
+                      toggled = true;
+                      reply_text_msg(if alarm.title == "" {
+                        build_plain_message(format!("闹钟已关闭。"))
+                      } else {
+                        build_plain_message(format!("闹钟 {} 已关闭。", alarm.title))
+                      });
+                      break;
+                    }
+                  }
+                }
+              }
+              if toggled {
+                store.save().expect("Failed to save state");
+              }
               continue;
             }
             let text = message_text.text().text();
@@ -264,13 +291,17 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                         let mut alarms = alarms.borrow_mut();
                         let tz = state.timezone.get(&message.sender_user_id());
                         let disalarm_if_in_an_hour =
-                          |t: i64, a: Option<&mut Alarm>| -> InputMessageContent {
+                          |t: i64,
+                           s: Option<String>,
+                           a: Option<&mut Alarm>|
+                           -> InputMessageContent {
                             if let None = a {
                               return build_fmt_message(|f| {
                                 f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
                               });
                             }
                             let a = a.unwrap();
+                            let s = s.unwrap();
                             if a.is_pending {
                               return build_plain_message(
                                 "你不能移除正在响铃的闹钟，请先关闭闹钟。",
@@ -283,15 +314,22 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                             }
                             if a.is_informing {
                               a.is_informing = false;
-                              return build_plain_message(
-                                "你不能移除正在进行的闹钟，请先关闭闹钟。",
-                              );
+                              return if a.title == "" {
+                                build_plain_message(format!("已关闭正在进行的闹钟。"))
+                              } else {
+                                build_plain_message(format!("已关闭正在进行的闹钟 {}。", a.title))
+                              };
                             }
                             if t >= now && t < now + 3600 {
                               a.is_oneoff = true;
-                              return build_plain_message(
-                                "你不能移除正在进行的闹钟，请先关闭闹钟。",
-                              );
+                              return if a.title == "" {
+                                build_plain_message(format!("已取消预定于 {} 的闹钟。", s))
+                              } else {
+                                build_plain_message(format!(
+                                  "已取消预定于 {} 的闹钟 {}。",
+                                  s, a.title
+                                ))
+                              };
                             }
                             return build_fmt_message(|f| {
                               f_bad_arguments(f, "最近没有要响的闹钟。")
@@ -303,6 +341,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               get_recent_schedule_mut(&mut *alarms, tz.parse::<Tz>().unwrap());
                             disalarm_if_in_an_hour(
                               next_alarm.schedule().to_timestamp(),
+                              next_alarm.schedule().to_string(),
                               next_alarm.alarm_mut(),
                             )
                           }
@@ -311,6 +350,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               get_recent_schedule_mut(&mut *alarms, chrono::Local.clone());
                             disalarm_if_in_an_hour(
                               next_alarm.schedule().to_timestamp(),
+                              next_alarm.schedule().to_string(),
                               next_alarm.alarm_mut(),
                             )
                           }
