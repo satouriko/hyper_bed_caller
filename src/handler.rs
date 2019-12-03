@@ -347,7 +347,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                            -> InputMessageContent {
                             if let None = a {
                               if message.chat_id() < 0 {
-                                return build_plain_message("没有要响的闹钟了，回私聊试试看？");
+                                return build_plain_message("这群看不到更多要响的闹钟了，不如回私聊试试看？");
                               }
                               return build_fmt_message(|f| {
                                 f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
@@ -382,7 +382,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               });
                             }
                             if message.chat_id() < 0 {
-                              return build_plain_message("最近没有要响的闹钟了，回私聊试试看？");
+                              return build_plain_message("这群最近没有要响的闹钟了，不如回私聊试试看？");
                             }
                             return build_fmt_message(|f| {
                               f_bad_arguments(f, "最近没有要响的闹钟。")
@@ -390,8 +390,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                           };
                         match tz {
                           Some(tz) => {
-                            let mut next_alarm =
-                              get_recent_schedule_mut(&mut *alarms, tz.parse::<Tz>().unwrap());
+                            let mut next_alarm = get_recent_schedule_mut(
+                              &mut *alarms,
+                              tz.parse::<Tz>().unwrap(),
+                              message.chat_id(),
+                            );
                             disalarm_if_in_an_hour(
                               next_alarm.schedule().to_timestamp(),
                               next_alarm.schedule().to_string(),
@@ -399,8 +402,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                             )
                           }
                           None => {
-                            let mut next_alarm =
-                              get_recent_schedule_mut(&mut *alarms, chrono::Local.clone());
+                            let mut next_alarm = get_recent_schedule_mut(
+                              &mut *alarms,
+                              chrono::Local.clone(),
+                              message.chat_id(),
+                            );
                             disalarm_if_in_an_hour(
                               next_alarm.schedule().to_timestamp(),
                               next_alarm.schedule().to_string(),
@@ -515,10 +521,18 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   }
                 };
                 let to_send = match time_str {
-                  Some(time_str) => format!("下次闹钟时间：{} {}", time_str, alarm_title),
-                  None => format!("没有要响的闹钟了。"),
+                  Some(time_str) => {
+                    build_plain_message(format!("下次闹钟时间：{} {}", time_str, alarm_title))
+                  }
+                  None => {
+                    if message.chat_id() < 0 {
+                      build_plain_message(format!("这群看不到更多要响的闹钟了，不如回私聊试试看？"))
+                    } else {
+                      build_fmt_message(|f| f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。"))
+                    }
+                  }
                 };
-                reply_text_msg(build_plain_message(to_send));
+                reply_text_msg(to_send);
               }
               "#purge" => {
                 let purged_cnt = {

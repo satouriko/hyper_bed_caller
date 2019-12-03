@@ -114,9 +114,13 @@ where
   let next_timestamp = 0;
   let mut recent = AlarmSchedule::default();
   for alarm in alarms.iter() {
+    if alarm.is_disabled || alarm.is_onceoff {
+      continue;
+    }
     if chat_id < 0 && alarm.chat_id != chat_id {
       continue;
     }
+
     let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
@@ -126,13 +130,23 @@ where
   return recent;
 }
 
-pub fn get_recent_schedule_mut<Z>(alarms: &mut Vec<Alarm>, timezone: Z) -> AlarmScheduleMut<Z>
+pub fn get_recent_schedule_mut<Z>(
+  alarms: &mut Vec<Alarm>,
+  timezone: Z,
+  chat_id: i64,
+) -> AlarmScheduleMut<Z>
 where
   Z: TimeZone + 'static,
 {
   let next_timestamp = 0;
   let mut recent = AlarmScheduleMut::default();
   for alarm in alarms.iter_mut() {
+    if alarm.is_disabled || alarm.is_onceoff {
+      continue;
+    }
+    if chat_id < 0 && alarm.chat_id != chat_id {
+      continue;
+    }
     let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
