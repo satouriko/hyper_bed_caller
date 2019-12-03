@@ -1,2 +1,6 @@
 /target
 **/*.rs.bk
+/td
+libtdjson.so.*
+hyper_bed_caller
+.env

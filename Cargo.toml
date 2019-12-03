@@ -10,7 +10,7 @@ chrono = "0.4"
 chrono-tz = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rtdlib = "1.5"
+rtdlib = "1.5.0"
 uname = "0.1.1"
 cron = "0.6.0"
 
