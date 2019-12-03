@@ -93,6 +93,9 @@ where
         have_expired = true;
       }
     }
+    if alarm.is_disabled {
+      text += "#已禁用  ";
+    }
     if alarm.title != "" {
       text += &format!("{}  ", alarm.title);
     }

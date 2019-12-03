@@ -10,6 +10,7 @@ where
   T: AsRef<str>,
 {
   let tdlib = Arc::new(Tdlib::new());
+  Tdlib::set_log_verbosity_level(2).unwrap();
   let set_online = SetOption::builder()
     .name("online")
     .value(OptionValue::Boolean(
@@ -127,6 +128,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             }
             if !text.starts_with("#") {
               let mut toggled = false;
+              let now = chrono::Local::now().timestamp();
               {
                 let state = store.state();
                 let user_alarms = state.alarms.get(&message.sender_user_id());
@@ -145,6 +147,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                       } else {
                         build_plain_message(format!("闹钟 {} 已关闭。", alarm.title))
                       });
+                      println!(
+                        "[{}] Fulfilled alarm {} due to completing challenge",
+                        now, alarm
+                      );
                       break;
                     }
                   }
@@ -321,7 +327,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               };
                             }
                             if t >= now && t < now + 3600 {
-                              a.is_oneoff = true;
+                              a.is_onceoff = true;
                               return if a.title == "" {
                                 build_plain_message(format!("已取消预定于 {} 的闹钟。", s))
                               } else {
@@ -535,6 +541,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         }
         match call.state() {
           CallState::ExchangingKeys(_) => {
+            let now = chrono::Local::now().timestamp();
             let state = store.state();
             let user_alarms = state.alarms.get(&user_id);
             if let None = user_alarms {
@@ -547,6 +554,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 alarm.is_pending = false;
                 if !alarm.is_strict {
                   alarm.is_informing = false;
+                  println!("[{}] Fulfilled alarm {} due to answering call", now, alarm);
                 } else {
                   let (challenge, answer, map) = generate_strict_challenge();
                   alarm.strict_challenge = answer;
@@ -557,11 +565,16 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                     }))
                     .build();
                   tdlib.send(&req.to_json().expect("Bad JSON"));
+                  println!(
+                    "[{}] Challenged user with {} in need of closing alarm {}",
+                    now, alarm.strict_challenge, alarm
+                  );
                 }
               }
             }
           }
           CallState::Discarded(_) => {
+            let now = chrono::Local::now().timestamp();
             let state = store.state();
             let user_alarms = state.alarms.get(&user_id);
             if let None = user_alarms {
@@ -572,6 +585,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             for alarm in alarms.iter_mut() {
               if alarm.is_pending {
                 alarm.is_pending = false;
+                println!("[{}] Will alarm {} again due to declining call", now, alarm);
               }
             }
           }
@@ -579,9 +593,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         }
         store.save().expect("Failed to save state")
       }
-      _ => {
-        println!("{}\t{}", td_type, json);
-      }
+      _ => {}
     };
   })
 }
@@ -623,16 +635,29 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
             };
             if should_alarm {
               if alarm.is_pending {
+                println!("[{}] Skipped alarm {} due to is pending", now, alarm);
                 continue;
               }
-              // is_oneoff * is_informing = 0
-              if alarm.is_oneoff {
-                alarm.is_oneoff = false;
+              if alarm.is_disabled {
+                println!("[{}] Skipped alarm {} due to is disabled", now, alarm);
                 continue;
               }
+              if alarm.is_onceoff {
+                println!("[{}] Skipped alarm {} due to is one off", now, alarm);
+                alarm.is_onceoff = false;
+                continue;
+              }
+              println!(
+                "[{}] About to ring alarm {}, is reschedule: {}",
+                now, alarm, alarm.is_informing
+              );
               alarm.is_pending = true;
               alarm.is_informing = true;
               alarm.reschedule = now + 300;
+              println!(
+                "[{}] Scheduled next alarm {} at {}",
+                now, alarm, alarm.reschedule
+              );
               if alarm.title != "" {
                 let req = SendMessage::builder()
                   .chat_id(*user_id)

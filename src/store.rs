@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::fs;
 use std::sync::{Mutex, MutexGuard};
 
@@ -12,7 +13,8 @@ pub struct Alarm {
   pub cron: String,
   pub title: String,
   pub is_strict: bool,
-  pub is_oneoff: bool,
+  pub is_onceoff: bool,
+  pub is_disabled: bool,
   pub is_pending: bool,
   pub is_informing: bool,
   pub strict_challenge: String,
@@ -30,12 +32,22 @@ impl Alarm {
       cron: String::from(cron.as_ref()),
       title: String::from(title.as_ref()),
       is_strict,
-      is_oneoff: false,
+      is_onceoff: false,
+      is_disabled: false,
       is_pending: false,
       is_informing: false,
       strict_challenge: String::default(),
       reschedule: 0,
     }
+  }
+}
+
+impl Display for Alarm {
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+    f.write_str(&format!(
+      "{}@{}://{}{}",
+      self.user_id, self.chat_id, self.cron, self.title
+    ))
   }
 }
 
