@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap};
 use std::{env, io, sync::Arc, thread, time};
 extern crate uname;
 use crate::{alarm::*, cmd::*, cron::*, fmt::*, store::*};
-use chrono;
+use chrono::offset::TimeZone;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
 
@@ -169,9 +169,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                 let user_alarms = user_alarms.unwrap();
                 let mut alarms = user_alarms.borrow_mut();
                 for alarm in alarms.iter_mut() {
-                  if alarm.is_strict && alarm.is_informing {
+                  if alarm.is_strict && alarm.is_informing != 0 {
                     if text == alarm.strict_challenge.as_str() {
-                      alarm.is_informing = false;
+                      alarm.is_informing = 0;
                       toggled = true;
                       reply_text_msg(if alarm.title == "" {
                         build_plain_message(format!("闹钟已关闭。"))
@@ -232,14 +232,22 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   if let None = user_alarms {
                     alarms_map.insert(message.sender_user_id(), RefCell::new(vec![]));
                   }
+                  let now_utc = chrono::Local::now().naive_utc();
                   let mut user_alarms = alarms_map
                     .get(&message.sender_user_id())
                     .unwrap()
                     .borrow_mut();
                   user_alarms.push(alarm);
                   let next_alarm = match tz {
-                    Some(tz) => get_next_schedule(cron_args.cron(), tz).to_string(),
-                    None => get_next_schedule(cron_args.cron(), chrono::Local.clone()).to_string(),
+                    Some(tz) => {
+                      get_next_schedule(cron_args.cron(), &tz.from_utc_datetime(&now_utc))
+                        .to_string()
+                    }
+                    None => get_next_schedule(
+                      cron_args.cron(),
+                      &chrono::Local.from_utc_datetime(&now_utc),
+                    )
+                    .to_string(),
                   };
                   let next_alarm = match next_alarm {
                     Some(next_alarm) => format!("下次闹钟时间：{}", next_alarm),
@@ -347,7 +355,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                            -> InputMessageContent {
                             if let None = a {
                               if message.chat_id() < 0 {
-                                return build_plain_message("这群看不到更多要响的闹钟了，不如回私聊试试看？");
+                                return build_plain_message(
+                                  "这群看不到更多要响的闹钟了，不如回私聊试试看？",
+                                );
                               }
                               return build_fmt_message(|f| {
                                 f_bad_arguments(f, "没有要响的闹钟了，去设置一些吧。")
@@ -360,13 +370,13 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                                 "你不能移除正在响铃的闹钟，请先关闭闹钟。",
                               );
                             }
-                            if a.is_informing && a.is_strict {
+                            if a.is_informing != 0 && a.is_strict {
                               return build_plain_message(
                                 "你不能移除正在进行的闹钟，请先关闭闹钟。",
                               );
                             }
-                            if a.is_informing {
-                              a.is_informing = false;
+                            if a.is_informing != 0 {
+                              a.is_informing = 0;
                               return if a.title == "" {
                                 build_plain_message("已关闭正在进行的闹钟。")
                               } else {
@@ -382,7 +392,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                               });
                             }
                             if message.chat_id() < 0 {
-                              return build_plain_message("这群最近没有要响的闹钟了，不如回私聊试试看？");
+                              return build_plain_message(
+                                "这群最近没有要响的闹钟了，不如回私聊试试看？",
+                              );
                             }
                             return build_fmt_message(|f| {
                               f_bad_arguments(f, "最近没有要响的闹钟。")
@@ -426,7 +438,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   message.sender_user_id(),
                   &cmd,
                   |alarms, id| {
-                    if alarms[id].is_strict && alarms[id].is_informing {
+                    if alarms[id].is_strict && alarms[id].is_informing != 0 {
                       build_plain_message("你不能移除正在进行的闹钟，请先关闭闹钟。")
                     } else {
                       alarms.remove(id);
@@ -441,12 +453,12 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   message.sender_user_id(),
                   &cmd,
                   |alarms, id| {
-                    if alarms[id].is_strict && alarms[id].is_informing {
+                    if alarms[id].is_strict && alarms[id].is_informing != 0 {
                       build_plain_message("你不能禁用正在进行的闹钟，请先关闭闹钟。")
                     } else if alarms[id].is_disabled {
                       build_plain_message("闹钟已经是禁用状态。")
                     } else {
-                      alarms[id].is_informing = false;
+                      alarms[id].is_informing = 0;
                       alarms[id].is_disabled = true;
                       if alarms[id].title == "" {
                         build_plain_message("闹钟已禁用。")
@@ -482,7 +494,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   message.sender_user_id(),
                   &cmd,
                   |alarms, id| {
-                    if alarms[id].is_informing {
+                    if alarms[id].is_informing != 0 {
                       build_plain_message("你不能对正在进行的闹钟使用此命令。")
                     } else {
                       alarms[id].is_strict = !alarms[id].is_strict;
@@ -540,6 +552,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   let alarms_map = state.alarms.borrow();
                   let timezone_map = state.timezone.borrow();
                   let user_alarms = alarms_map.get(&message.sender_user_id());
+                  let now_utc = chrono::Local::now().naive_utc();
                   if let None = user_alarms {
                     reply_text_msg(build_plain_message("还一个闹钟都没有呢。"));
                     continue;
@@ -557,13 +570,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   let mut i = 0;
                   let mut purged_cnt = 0;
                   while i != alarms.len() {
-                    if alarms[i].is_informing {
+                    if alarms[i].is_informing != 0 {
                       i += 1;
                       continue;
                     }
                     match tz {
                       Some(tz) => {
-                        let next_alarm = get_next_schedule(&alarms[i].cron, tz);
+                        let next_alarm =
+                          get_next_schedule(&alarms[i].cron, &tz.from_utc_datetime(&now_utc));
                         if !next_alarm.has_schedule() {
                           alarms.remove(i);
                           purged_cnt += 1;
@@ -572,7 +586,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                         }
                       }
                       None => {
-                        let next_alarm = get_next_schedule(&alarms[i].cron, chrono::Local.clone());
+                        let next_alarm = get_next_schedule(
+                          &alarms[i].cron,
+                          &chrono::Local.from_utc_datetime(&now_utc),
+                        );
                         if !next_alarm.has_schedule() {
                           alarms.remove(i);
                           purged_cnt += 1;
@@ -639,13 +656,58 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         let user_id = call.user_id();
         if !call.is_outgoing() {
           if let CallState::Pending(_) = call.state() {
-            let req = DiscardCall::builder().call_id(call.id()).build();
+            let req = DiscardCall::builder()
+              .is_disconnected(true)
+              .call_id(call.id())
+              .build();
             tdlib.send(&req.to_json().expect("Bad JSON"));
           }
           continue;
         }
+        let handle_discard_error = |is_discard: bool| {
+          let now = chrono::Local::now().timestamp();
+          let state = store.state();
+          let users_map = state.users.borrow();
+          let alarms_map = state.alarms.borrow();
+          let user_name = users_map.get(&user_id);
+          let user_name = match user_name {
+            None => "他",
+            Some(name) => name,
+          };
+          let user_alarms = alarms_map.get(&user_id);
+          if let None = user_alarms {
+            return;
+          }
+          let user_alarms = user_alarms.unwrap();
+          let mut alarms = user_alarms.borrow_mut();
+          for alarm in alarms.iter_mut() {
+            if alarm.is_pending {
+              alarm.is_pending = false;
+              println!("[{}] Will alarm {} again due to declining call", now, alarm);
+              if alarm.chat_id < 0
+                && ((!alarm.is_strict && alarm.is_informing == 1)
+                  || (alarm.is_strict && alarm.is_informing == 2))
+              {
+                let req = SendMessage::builder()
+                  .chat_id(alarm.chat_id)
+                  .input_message_content(build_fmt_message(|f| {
+                    f_help_alarm(f, user_name, user_id, is_discard)
+                  }))
+                  .build();
+                tdlib.send(&req.to_json().expect("Bad JSON"));
+                println!(
+                  "[{}] Sent help message for alarm {} due to chat_id < 0",
+                  now, alarm
+                );
+                alarm.is_informing += 1;
+              }
+              break;
+            }
+          }
+        };
         match call.state() {
           CallState::ExchangingKeys(_) => {
+            println!("{}", json);
             let now = chrono::Local::now().timestamp();
             let state = store.state();
             let alarms_map = state.alarms.borrow();
@@ -660,66 +722,49 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               if alarm.is_pending {
                 alarm.is_pending = false;
                 if !alarm.is_strict {
-                  alarm.is_informing = false;
+                  alarm.is_informing = 0;
                   unlock_user(user_id, &mut sleeping_map);
                   println!("[{}] Fulfilled alarm {} due to answering call", now, alarm);
                 } else {
-                  let (challenge, answer, map) = generate_strict_challenge();
-                  alarm.strict_challenge = answer;
-                  let req = SendMessage::builder()
-                    .chat_id(user_id)
-                    .input_message_content(build_fmt_message(|f| {
-                      f_strict_challenge(f, &challenge, &map)
-                    }))
-                    .build();
-                  tdlib.send(&req.to_json().expect("Bad JSON"));
-                  println!(
-                    "[{}] Challenged user with {} in need of closing alarm {}",
-                    now, alarm.strict_challenge, alarm
-                  );
+                  if alarm.is_informing == 1 {
+                    let (challenge, answer, map) = generate_strict_challenge();
+                    alarm.strict_challenge = answer;
+                    let req = SendMessage::builder()
+                      .chat_id(user_id)
+                      .input_message_content(build_fmt_message(|f| {
+                        f_strict_challenge(f, &challenge, &map)
+                      }))
+                      .build();
+                    tdlib.send(&req.to_json().expect("Bad JSON"));
+                    println!(
+                      "[{}] Challenged user with {} in need of closing alarm {}",
+                      now, alarm.strict_challenge, alarm
+                    );
+                  } else {
+                    handle_discard_error(true);
+                  }
                 }
+                let req = DiscardCall::builder()
+                  .is_disconnected(true)
+                  .call_id(call.id())
+                  .build();
+                tdlib.send(&req.to_json().expect("Bad JSON"));
+                break;
               }
             }
           }
           CallState::Discarded(_) => {
-            let now = chrono::Local::now().timestamp();
-            let state = store.state();
-            let users_map = state.users.borrow();
-            let alarms_map = state.alarms.borrow();
-            let user_name = users_map.get(&user_id);
-            let user_name = match user_name {
-              None => "他",
-              Some(name) => name,
-            };
-            let user_alarms = alarms_map.get(&user_id);
-            if let None = user_alarms {
-              continue;
-            }
-            let user_alarms = user_alarms.unwrap();
-            let mut alarms = user_alarms.borrow_mut();
-            for alarm in alarms.iter_mut() {
-              if alarm.is_pending {
-                alarm.is_pending = false;
-                println!("[{}] Will alarm {} again due to declining call", now, alarm);
-                if alarm.chat_id < 0 {
-                  let req = SendMessage::builder()
-                    .chat_id(alarm.chat_id)
-                    .input_message_content(build_fmt_message(|f| {
-                      f_help_alarm(f, user_name, user_id)
-                    }))
-                    .build();
-                  tdlib.send(&req.to_json().expect("Bad JSON"));
-                  println!(
-                    "[{}] Sent help message for alarm {} due to chat_id < 0",
-                    now, alarm
-                  );
-                }
-              }
-            }
+            println!("{}", json);
+            handle_discard_error(true);
           }
-          _ => {}
+          CallState::Error(_) => {
+            handle_discard_error(false);
+          }
+          _ => {
+            println!("{}", json);
+          }
         }
-        store.save().expect("Failed to save state")
+        store.save().expect("Failed to save state");
       }
       _ => {}
     };
@@ -730,11 +775,12 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
   let mut service = CronService::new();
   thread::spawn(move || loop {
     thread::sleep(time::Duration::from_secs(1));
-    service.tick(|lask_tick, now| {
+    service.tick(|last_tick, now| {
       {
         let state = store.state();
         let alarms_map = state.alarms.borrow();
         let timezone_map = state.timezone.borrow();
+        let last_tick_utc = chrono::NaiveDateTime::from_timestamp(last_tick, 0);
         for (user_id, user_alarms) in &*alarms_map {
           let tz = timezone_map.get(user_id);
           let tz = match tz {
@@ -746,22 +792,37 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
           };
           let mut alarms = user_alarms.borrow_mut();
           for alarm in alarms.iter_mut() {
-            let should_alarm = match tz {
+            let (should_alarm, should_stop) = match tz {
               Some(tz) => {
                 let next_alarm = match alarm.is_informing {
-                  false => get_next_schedule(&alarm.cron, tz).to_timestamp(),
-                  true => alarm.reschedule,
+                  0 => get_next_schedule(&alarm.cron, &tz.from_utc_datetime(&last_tick_utc))
+                    .to_timestamp(),
+                  _ => alarm.reschedule,
                 };
-                next_alarm > lask_tick && next_alarm <= now
+                (
+                  next_alarm > last_tick && next_alarm <= now,
+                  next_alarm <= last_tick,
+                )
               }
               None => {
                 let next_alarm = match alarm.is_informing {
-                  false => get_next_schedule(&alarm.cron, chrono::Local.clone()).to_timestamp(),
-                  true => alarm.reschedule,
+                  0 => get_next_schedule(
+                    &alarm.cron,
+                    &chrono::Local.from_utc_datetime(&last_tick_utc),
+                  )
+                  .to_timestamp(),
+                  _ => alarm.reschedule,
                 };
-                next_alarm > lask_tick && next_alarm <= now
+                (
+                  next_alarm > last_tick && next_alarm <= now,
+                  next_alarm <= last_tick,
+                )
               }
             };
+            if should_stop {
+              alarm.is_pending = false;
+              alarm.is_informing = 0;
+            }
             if should_alarm {
               if alarm.is_pending {
                 println!("[{}] Skipped alarm {} due to is pending", now, alarm);
@@ -781,7 +842,9 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
                 now, alarm, alarm.is_informing
               );
               alarm.is_pending = true;
-              alarm.is_informing = true;
+              if alarm.is_informing == 0 {
+                alarm.is_informing += 1;
+              }
               alarm.reschedule = now + 300;
               println!(
                 "[{}] Scheduled next alarm {} at {}",

@@ -16,7 +16,7 @@ pub struct Alarm {
   pub is_onceoff: bool,
   pub is_disabled: bool,
   pub is_pending: bool,
-  pub is_informing: bool,
+  pub is_informing: i64,
   pub strict_challenge: String,
   pub reschedule: i64,
 }
@@ -35,7 +35,7 @@ impl Alarm {
       is_onceoff: false,
       is_disabled: false,
       is_pending: false,
-      is_informing: false,
+      is_informing: 0,
       strict_challenge: String::default(),
       reschedule: 0,
     }

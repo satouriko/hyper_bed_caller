@@ -113,6 +113,7 @@ where
 {
   let next_timestamp = 0;
   let mut recent = AlarmSchedule::default();
+  let now = timezone.from_utc_datetime(&Local::now().naive_utc());
   for alarm in alarms.iter() {
     if alarm.is_disabled || alarm.is_onceoff {
       continue;
@@ -120,8 +121,7 @@ where
     if chat_id < 0 && alarm.chat_id != chat_id {
       continue;
     }
-
-    let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
+    let next_alarm = get_next_schedule(&alarm.cron, &now);
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
       recent = AlarmSchedule::new(next_alarm.inner.unwrap(), alarm);
@@ -140,6 +140,7 @@ where
 {
   let next_timestamp = 0;
   let mut recent = AlarmScheduleMut::default();
+  let now = timezone.from_utc_datetime(&Local::now().naive_utc());
   for alarm in alarms.iter_mut() {
     if alarm.is_disabled || alarm.is_onceoff {
       continue;
@@ -147,7 +148,7 @@ where
     if chat_id < 0 && alarm.chat_id != chat_id {
       continue;
     }
-    let next_alarm = get_next_schedule(&alarm.cron, timezone.clone());
+    let next_alarm = get_next_schedule(&alarm.cron, &now);
     let t = next_alarm.to_timestamp();
     if t >= 0 && (next_timestamp == 0 || t < next_timestamp) {
       recent = AlarmScheduleMut::new(next_alarm.inner.unwrap(), alarm);
@@ -273,13 +274,13 @@ where
 {
 }
 
-pub fn get_next_schedule<T, Z>(cron: T, timezone: Z) -> Schedule<Z>
+pub fn get_next_schedule<T, Z>(cron: T, after: &DateTime<Z>) -> Schedule<Z>
 where
   T: AsRef<str>,
   Z: TimeZone,
 {
   let schedule = cron::Schedule::from_str(cron.as_ref()).unwrap();
-  for datetime in schedule.upcoming(timezone).take(1) {
+  for datetime in schedule.after(after).take(1) {
     return Schedule::new(datetime);
   }
   return Schedule::default();
