@@ -70,7 +70,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             SetTdlibParameters::builder()
               .parameters(
                 TdlibParameters::builder()
-                  .database_directory("tdlib")
+                  .database_directory("/data/tdlib")
                   .use_message_database(true)
                   .use_secret_chats(true)
                   .api_id(env!("API_ID").parse::<i64>().expect("Bad API ID"))
@@ -270,6 +270,9 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
             };
             match cmd.cmd() {
+              "#about" => {
+                reply_text_msg(build_fmt_message(f_about_message));
+              }
               "#help" => {
                 reply_text_msg(build_fmt_message(f_help_message));
               }

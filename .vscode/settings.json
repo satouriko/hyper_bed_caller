@@ -1,3 +1,3 @@
 {
-    "rust-client.rlsPath": "API_ID=0 API_HASH= rls"
+    "rust-client.rlsPath": "API_ID=0 API_HASH= COMMIT_SHA= rls"
 }

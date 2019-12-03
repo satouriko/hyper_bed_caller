@@ -40,6 +40,25 @@ where
   )
 }
 
+pub fn f_about_message(f: &mut RTDFormattedTextBuilder) {
+  let mut text = String::from("是\u{1f980}女仆。");
+  let url_text = "点击查看源代码。";
+  let href = format!(
+    "https://github.com/rikakomoe/hyper_bed_caller/tree/{}",
+    env!("COMMIT_SHA")
+  );
+  let url = TextEntityTypeTextUrl::builder().url(url_text).build();
+  let url_entity = TextEntity::builder()
+    .type_(TextEntityType::TextUrl(url))
+    .offset(text.encode_utf16().count().try_into().unwrap())
+    .length(href.encode_utf16().count().try_into().unwrap())
+    .build();
+  text += url_text;
+  f.text(text);
+  let entities = vec![url_entity];
+  f.entities(entities);
+}
+
 pub fn f_help_message(f: &mut RTDFormattedTextBuilder) {
   f.text(HELP_TEXT);
   let url = TextEntityTypeTextUrl::builder().url(HELP_URL).build();
