@@ -47,11 +47,11 @@ pub fn f_about_message(f: &mut RTDFormattedTextBuilder) {
     "https://github.com/rikakomoe/hyper_bed_caller/tree/{}",
     env!("COMMIT_SHA")
   );
-  let url = TextEntityTypeTextUrl::builder().url(url_text).build();
+  let url = TextEntityTypeTextUrl::builder().url(&href).build();
   let url_entity = TextEntity::builder()
     .type_(TextEntityType::TextUrl(url))
     .offset(text.encode_utf16().count().try_into().unwrap())
-    .length(href.encode_utf16().count().try_into().unwrap())
+    .length(url_text.encode_utf16().count().try_into().unwrap())
     .build();
   text += url_text;
   f.text(text);

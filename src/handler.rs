@@ -6,10 +6,7 @@ use chrono::offset::TimeZone;
 use chrono_tz::Tz;
 use rtdlib::{tdjson::Tdlib, types::*};
 
-pub fn initialize_app<T>(path: T) -> (Arc<Tdlib>, Arc<Store>)
-where
-  T: AsRef<str>,
-{
+pub fn initialize_app() -> (Arc<Tdlib>, Arc<Store>) {
   let tdlib = Arc::new(Tdlib::new());
   Tdlib::set_log_verbosity_level(2).unwrap();
   let set_online = SetOption::builder()
@@ -19,13 +16,16 @@ where
     ))
     .build();
   tdlib.send(&set_online.to_json().expect("Bad JSON"));
-  let store = Arc::new(Store::new(path));
+  let store = Arc::new(Store::new(format!(
+    "{}/store.json",
+    env::var("DATA_PATH").expect("Unknown env DATA_PATH")
+  )));
   return (tdlib, store);
 }
 
 pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()> {
   let mut user_name = String::default();
-  let phone_number = env::var("PHONE").expect("Unknown env phone number");
+  let phone_number = env::var("PHONE").expect("Unknown env PHONE");
   let phone_number = if phone_number.starts_with("+") {
     phone_number[1..].to_string()
   } else {
@@ -70,7 +70,10 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             SetTdlibParameters::builder()
               .parameters(
                 TdlibParameters::builder()
-                  .database_directory("/data/tdlib")
+                  .database_directory(format!(
+                    "{}/tdlib",
+                    env::var("DATA_PATH").expect("Unknown env DATA_PATH")
+                  ))
                   .use_message_database(true)
                   .use_secret_chats(true)
                   .api_id(env!("API_ID").parse::<i64>().expect("Bad API ID"))
@@ -129,7 +132,20 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         {
           let state = store.state();
           let mut users_map = state.users.borrow_mut();
-          users_map.insert(user.id(), user.first_name().clone());
+          let mut alarms_map = state.alarms.borrow_mut();
+          let mut timezone_map = state.timezone.borrow_mut();
+          let mut sleeping_map = state.sleeping.borrow_mut();
+          match user.type_() {
+            UserType::Regular(_) => {
+              users_map.insert(user.id(), user.first_name().clone());
+            }
+            _ => {
+              users_map.remove(&user.id());
+              alarms_map.remove(&user.id());
+              timezone_map.remove(&user.id());
+              sleeping_map.remove(&user.id());
+            }
+          }
         }
         store.save().expect("Failed to save state");
       }
@@ -139,6 +155,14 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         let message = update_new_message.message();
         if message.is_outgoing() {
           continue;
+        }
+        {
+          let state = store.state();
+          let users_map = state.users.borrow();
+          if let None = users_map.get(&message.sender_user_id()) {
+            println!("Received message from unknown users, skip in respect of bot accounts.");
+            continue;
+          }
         }
         let reply_text_msg = |msg: InputMessageContent| {
           let req = SendMessage::builder()
