@@ -681,6 +681,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
         let update_call: UpdateCall = serde_json::from_str(json.as_str()).unwrap_or_default();
         let call = update_call.call();
         let user_id = call.user_id();
+        println!("{}", json);
         if !call.is_outgoing() {
           if let CallState::Pending(_) = call.state() {
             let req = DiscardCall::builder()
@@ -691,16 +692,37 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           }
           continue;
         }
+        let handle_help_message =
+          |alarm: &mut Alarm,
+           now: i64,
+           is_discard: bool,
+           users_map: &std::collections::HashMap<i64, std::string::String>,
+           user_id: i64| {
+            let user_name = users_map.get(&user_id);
+            let user_name = match user_name {
+              None => "他",
+              Some(name) => name,
+            };
+            if alarm.chat_id < 0 && (alarm.is_informing == 1 || alarm.is_informing == 2) {
+              let req = SendMessage::builder()
+                .chat_id(alarm.chat_id)
+                .input_message_content(build_fmt_message(|f| {
+                  f_help_alarm(f, user_name, user_id, is_discard)
+                }))
+                .build();
+              tdlib.send(&req.to_json().expect("Bad JSON"));
+              println!(
+                "[{}] Sent help message for alarm {} due to chat_id < 0, is informing: {}",
+                now, alarm, alarm.is_informing
+              );
+              alarm.is_informing += 2;
+            }
+          };
         let handle_discard_error = |is_discard: bool| {
           let now = chrono::Local::now().timestamp();
           let state = store.state();
           let users_map = state.users.borrow();
           let alarms_map = state.alarms.borrow();
-          let user_name = users_map.get(&user_id);
-          let user_name = match user_name {
-            None => "他",
-            Some(name) => name,
-          };
           let user_alarms = alarms_map.get(&user_id);
           if let None = user_alarms {
             return;
@@ -710,34 +732,21 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           for alarm in alarms.iter_mut() {
             if alarm.is_pending {
               alarm.is_pending = false;
-              println!("[{}] Will alarm {} again due to declining call", now, alarm);
-              if alarm.chat_id < 0
-                && ((!alarm.is_strict && alarm.is_informing == 1)
-                  || (alarm.is_strict && alarm.is_informing == 2))
-              {
-                let req = SendMessage::builder()
-                  .chat_id(alarm.chat_id)
-                  .input_message_content(build_fmt_message(|f| {
-                    f_help_alarm(f, user_name, user_id, is_discard)
-                  }))
-                  .build();
-                tdlib.send(&req.to_json().expect("Bad JSON"));
-                println!(
-                  "[{}] Sent help message for alarm {} due to chat_id < 0",
-                  now, alarm
-                );
-                alarm.is_informing += 1;
-              }
+              println!(
+                "[{}] Will alarm {} again due to unfulfilled call, is discard: {}",
+                now, alarm, is_discard
+              );
+              handle_help_message(alarm, now, is_discard, &*users_map, user_id);
               break;
             }
           }
         };
         match call.state() {
           CallState::ExchangingKeys(_) => {
-            println!("{}", json);
             let now = chrono::Local::now().timestamp();
             let state = store.state();
             let alarms_map = state.alarms.borrow();
+            let users_map = state.users.borrow();
             let mut sleeping_map = state.sleeping.borrow_mut();
             let user_alarms = alarms_map.get(&user_id);
             if let None = user_alarms {
@@ -753,23 +762,25 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   unlock_user(user_id, &mut sleeping_map);
                   println!("[{}] Fulfilled alarm {} due to answering call", now, alarm);
                 } else {
-                  if alarm.is_informing == 1 {
-                    let (challenge, answer, map) = generate_strict_challenge();
-                    alarm.strict_challenge = answer;
-                    let req = SendMessage::builder()
-                      .chat_id(user_id)
-                      .input_message_content(build_fmt_message(|f| {
-                        f_strict_challenge(f, &challenge, &map)
-                      }))
-                      .build();
-                    tdlib.send(&req.to_json().expect("Bad JSON"));
-                    println!(
-                      "[{}] Challenged user with {} in need of closing alarm {}",
-                      now, alarm.strict_challenge, alarm
-                    );
-                  } else {
-                    handle_discard_error(true);
-                  }
+                  alarm.is_informing += 1;
+                  let (challenge, answer, map) = generate_strict_challenge();
+                  alarm.strict_challenge = answer;
+                  let req = SendMessage::builder()
+                    .chat_id(user_id)
+                    .input_message_content(build_fmt_message(|f| {
+                      f_strict_challenge(f, &challenge, &map)
+                    }))
+                    .build();
+                  tdlib.send(&req.to_json().expect("Bad JSON"));
+                  println!(
+                    "[{}] Challenged user with {} in need of closing alarm {}",
+                    now, alarm.strict_challenge, alarm
+                  );
+                  println!(
+                    "[{}] Will alarm {} again due to unfulfilled strict call even it was answered",
+                    now, alarm
+                  );
+                  handle_help_message(alarm, now, true, &*users_map, user_id);
                 }
                 let req = DiscardCall::builder()
                   .is_disconnected(true)
@@ -781,15 +792,12 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             }
           }
           CallState::Discarded(_) => {
-            println!("{}", json);
             handle_discard_error(true);
           }
           CallState::Error(_) => {
             handle_discard_error(false);
           }
-          _ => {
-            println!("{}", json);
-          }
+          _ => {}
         }
         store.save().expect("Failed to save state");
       }
@@ -865,7 +873,7 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
                 continue;
               }
               println!(
-                "[{}] About to ring alarm {}, is reschedule: {}",
+                "[{}] About to ring alarm {}, is informing: {}",
                 now, alarm, alarm.is_informing
               );
               alarm.is_pending = true;
@@ -874,7 +882,7 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
               }
               alarm.reschedule = now + 300;
               println!(
-                "[{}] Scheduled next alarm {} at {}",
+                "[{}] Prospective next call of alarm {} scheduled at {}",
                 now, alarm, alarm.reschedule
               );
               if alarm.title != "" {

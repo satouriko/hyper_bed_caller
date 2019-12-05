@@ -15,6 +15,6 @@ docker build -f Dockerfile.local \
   .
 
 docker create --name hyperbedcaller hyperbedcaller
-docker cp hyperbedcaller:/usr/local/lib/libtdjson.so.1.5.0 .
+docker cp hyperbedcaller:/usr/lib/libtdjson.so.1.5.0 .
 docker cp hyperbedcaller:/hyper_bed_caller/target/release/hyper_bed_caller .
 docker rm hyperbedcaller

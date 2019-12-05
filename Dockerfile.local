@@ -1,9 +1,9 @@
 FROM rust:1.39
 COPY debian/sources.list /etc/apt/sources.list
-RUN apt-get update && apt-get install -y build-essential libcurl3 libssl-dev zlib1g-dev gperf cmake git
+RUN apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev gperf cmake git
 ADD td /td
 RUN cd /td && mkdir build && cd build \
-    && cmake -DCMAKE_BUILD_TYPE=Release .. && cmake --build . -- -j 4 \
+    && cmake -DCMAKE_INSTALL_PREFIX="/usr" -DCMAKE_BUILD_TYPE=Release .. && cmake --build . -- -j 4 \
     && cmake --build . --target install
 ARG API_ID=0
 ENV API_ID=${API_ID}
