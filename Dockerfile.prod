@@ -1,9 +1,9 @@
 FROM rust:1.39
 RUN apt-get update && apt-get install -y build-essential libssl-dev zlib1g-dev
 RUN apt-get install -y wget
-RUN wget -O /usr/lib/libtdjson.so.1.5.0 https://github.com/rikakomoe/hyper_bed_caller/releases/download/v0.1.0-beta/libtdjson.so.1.5.0
+RUN wget -O /usr/lib/libtdjson.so.1.5.0 https://github.com/rikakomoe/hyper_bed_caller/releases/download/v0.1.0/libtdjson.so.1.5.0
 RUN mkdir -p /hyper_bed_caller/target/release \
-    && wget -O /hyper_bed_caller/target/release/hyper_bed_caller https://github.com/rikakomoe/hyper_bed_caller/releases/download/v0.1.0-beta/hyper_bed_caller \
+    && wget -O /hyper_bed_caller/target/release/hyper_bed_caller https://github.com/rikakomoe/hyper_bed_caller/releases/download/v0.1.0/hyper_bed_caller \
     && chmod +x /hyper_bed_caller/target/release/hyper_bed_caller
 ENV DATA_PATH="/data"
 ENV TZ=Asia/Shanghai
