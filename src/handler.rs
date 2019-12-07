@@ -165,6 +165,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
           }
         }
         let reply_text_msg = |msg: InputMessageContent| {
+          let req = SendChatAction::builder()
+            .chat_id(message.chat_id())
+            .action(ChatAction::Typing(ChatActionTyping::builder().build()))
+            .build();
+          tdlib.send(&req.to_json().expect("Bad JSON"));
           let req = SendMessage::builder()
             .chat_id(message.chat_id())
             .input_message_content(msg)
@@ -172,14 +177,26 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
             .build();
           tdlib.send(&req.to_json().expect("Bad JSON"));
         };
+        let view_msg = || {
+          let req = ViewMessages::builder()
+            .chat_id(message.chat_id())
+            .message_ids(vec![message.id()])
+            .force_read(true)
+            .build();
+          tdlib.send(&req.to_json().expect("Bad JSON"));
+        };
         match message.content() {
           MessageContent::MessageText(message_text) => {
             let text = message_text.text().text();
             if text == "/help" || text == &format!("/help@{}", user_name) {
+              view_msg();
               reply_text_msg(build_fmt_message(f_help_message));
               continue;
             }
             if !text.starts_with("#") {
+              if message.chat_id() > 0 {
+                view_msg();
+              }
               let mut toggled = false;
               let now = chrono::Local::now().timestamp();
               {
@@ -217,6 +234,7 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               }
               continue;
             }
+            view_msg();
 
             let text = message_text.text().text();
             let cmd = parse_command_msg(text);
@@ -704,6 +722,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
               Some(name) => name,
             };
             if alarm.chat_id < 0 && (alarm.is_informing == 1 || alarm.is_informing == 2) {
+              let req = SendChatAction::builder()
+                .chat_id(alarm.chat_id)
+                .action(ChatAction::Typing(ChatActionTyping::builder().build()))
+                .build();
+              tdlib.send(&req.to_json().expect("Bad JSON"));
               let req = SendMessage::builder()
                 .chat_id(alarm.chat_id)
                 .input_message_content(build_fmt_message(|f| {
@@ -765,6 +788,11 @@ pub fn start_handler(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle
                   alarm.is_informing += 1;
                   let (challenge, answer, map) = generate_strict_challenge();
                   alarm.strict_challenge = answer;
+                  let req = SendChatAction::builder()
+                    .chat_id(user_id)
+                    .action(ChatAction::Typing(ChatActionTyping::builder().build()))
+                    .build();
+                  tdlib.send(&req.to_json().expect("Bad JSON"));
                   let req = SendMessage::builder()
                     .chat_id(user_id)
                     .input_message_content(build_fmt_message(|f| {
@@ -886,6 +914,11 @@ pub fn start_cron(tdlib: Arc<Tdlib>, store: Arc<Store>) -> thread::JoinHandle<()
                 now, alarm, alarm.reschedule
               );
               if alarm.title != "" {
+                let req = SendChatAction::builder()
+                  .chat_id(*user_id)
+                  .action(ChatAction::Typing(ChatActionTyping::builder().build()))
+                  .build();
+                tdlib.send(&req.to_json().expect("Bad JSON"));
                 let req = SendMessage::builder()
                   .chat_id(*user_id)
                   .input_message_content(build_plain_message(&alarm.title))
