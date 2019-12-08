@@ -14,13 +14,13 @@ pub struct AlarmScheduleMut<'a, Z: TimeZone> {
   inner: Option<(DateTime<Z>, &'a mut Alarm)>,
 }
 
-type AlarmScheduleMutRef<'a, Z> = Option<(&'a DateTime<Z>, &'a Alarm)>;
+type AlarmScheduleRef<'a, Z> = Option<(&'a DateTime<Z>, &'a Alarm)>;
 
 pub trait AsAlarmScheduleRef<Z>
 where
   Z: TimeZone + 'static,
 {
-  fn as_ref(&self) -> AlarmScheduleMutRef<Z>;
+  fn as_ref(&self) -> AlarmScheduleRef<Z>;
   fn schedule(&self) -> ScheduleRef<'_, Z> {
     match self.as_ref() {
       None => ScheduleRef::default(),
@@ -45,7 +45,7 @@ impl<Z> AsAlarmScheduleRef<Z> for AlarmScheduleMut<'_, Z>
 where
   Z: TimeZone + 'static,
 {
-  fn as_ref(&self) -> AlarmScheduleMutRef<Z> {
+  fn as_ref(&self) -> AlarmScheduleRef<Z> {
     match &self.inner {
       None => None,
       Some(alarm_schedule) => Some((&alarm_schedule.0, alarm_schedule.1)),
@@ -85,7 +85,7 @@ impl<Z> AsAlarmScheduleRef<Z> for AlarmSchedule<'_, Z>
 where
   Z: TimeZone + 'static,
 {
-  fn as_ref(&self) -> AlarmScheduleMutRef<Z> {
+  fn as_ref(&self) -> AlarmScheduleRef<Z> {
     match &self.inner {
       None => None,
       Some(alarm_schedule) => Some((&alarm_schedule.0, alarm_schedule.1)),
